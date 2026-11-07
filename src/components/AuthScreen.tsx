@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Mail, Lock, User, AlertCircle } from 'lucide-react'
-import { KrappLogoHelmet } from './HelmetIcons'
 import {
   signInWithGoogle,
   signInWithEmail,
@@ -66,12 +65,18 @@ export const AuthScreen: React.FC = () => {
     <div className="min-h-screen w-full bg-[#0d1114] text-white flex justify-center">
       <main className="w-full max-w-md min-h-screen bg-[#14191E] border-x border-[#222A32] flex flex-col justify-between p-6 select-none shadow-2xl">
         {/* Top Brand Header */}
-        <div className="pt-6 flex flex-col items-center text-center">
-          <div className="flex items-center gap-2.5 mb-1.5">
-            <div className="w-14 h-14 rounded-2xl bg-[#0B0D10] border border-[#FF6B00]/50 flex items-center justify-center p-1 shadow-lg shadow-[#FF6B00]/15">
-              <KrappLogoHelmet className="w-12 h-12" />
-            </div>
-            <span className="font-display italic font-extrabold text-5xl tracking-wider text-white">
+        <div className="pt-8 flex flex-col items-center text-center">
+          <div className="flex items-center mb-2">
+            <svg
+              viewBox="0 0 28 24"
+              className="w-8 h-8 -mr-1"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path d="M2 4H18L13 10H2L2 4Z" fill="#FF6B00" />
+              <path d="M8 11H22L16 21H10L14 11H8Z" fill="#FF6B00" opacity="0.85" />
+            </svg>
+            <span className="font-display italic font-extrabold text-4xl tracking-wider text-white">
               KRAPP
             </span>
           </div>

@@ -1,6 +1,5 @@
 import React from 'react'
 import { Menu, ArrowLeft, Bell, MoreHorizontal } from 'lucide-react'
-import { KrappLogoHelmet } from './HelmetIcons'
 
 interface TrackDayHeaderProps {
   sectionTitle: string
@@ -47,9 +46,17 @@ export const TrackDayHeader: React.FC<TrackDayHeaderProps> = ({
           </button>
         )}
 
-        {/* Official Track Day Pro Italic KRAPP Logo with Orange Helmet Emblem */}
-        <div className="flex items-center gap-1.5 select-none">
-          <KrappLogoHelmet className="w-8 h-8 drop-shadow-md" />
+        {/* Official Track Day Pro Italic KRAPP Logo */}
+        <div className="flex items-center select-none">
+          <svg
+            viewBox="0 0 28 24"
+            className="w-5 h-5 -mr-1"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M2 4H18L13 10H2L2 4Z" fill="#FF6B00" />
+            <path d="M8 11H22L16 21H10L14 11H8Z" fill="#FF6B00" opacity="0.85" />
+          </svg>
           <span className="font-display italic font-extrabold text-2xl tracking-wider text-white">
             KRAPP
           </span>

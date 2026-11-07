@@ -44,7 +44,7 @@
   <rect width="300" height="300" rx="64" fill="#0B0D10" />
   <rect x="6" y="6" width="288" height="288" rx="58" stroke="#FF6B00" stroke-opacity="0.35" stroke-width="4" />
 
-  <g transform="translate(8, 4) scale(0.95)">
+  <g transform="translate(28, 25) scale(0.81)">
     <path d="M 35 190 C 82 228, 150 262, 222 283 C 228 285, 233 282, 234 277 L 228 271 C 155 250, 88 218, 40 182 Z" fill="#08090C" />
 
     <g clip-path="url(#helmetClip)">

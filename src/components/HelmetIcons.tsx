@@ -105,7 +105,7 @@ export const HelmetSvg: React.FC<HelmetIconProps> = ({
 
   return (
     <svg
-      viewBox="16 14 262 278"
+      viewBox="-8 -10 310 326"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}

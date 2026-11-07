@@ -680,7 +680,7 @@ export function App() {
                     />
                   ) : profile.avatarType === 'helmet' ? (
                     <div className="flex flex-col items-center justify-center p-4">
-                      <HelmetSvg helmet={selectedHelmet} className="w-36 h-36" />
+                      <HelmetSvg helmet={selectedHelmet} className="w-24 h-24" />
                       {(profile.name || profile.surname) && (
                         <span className="mt-1 font-display text-lg font-extrabold tracking-wider text-white uppercase">
                           {profile.name} {profile.surname}{' '}
@@ -697,7 +697,7 @@ export function App() {
                     <div className="px-6 text-center flex flex-col items-center">
                       <HelmetSvg
                         helmet={selectedHelmet}
-                        className="w-28 h-28 mb-1"
+                        className="w-14 h-14 mb-1.5"
                       />
                       <span className="font-display text-2xl font-extrabold text-white tracking-wider">
                         DRIVER AVATAR
