@@ -5,10 +5,13 @@ import { HELMET_OPTIONS, HelmetSvg } from './components/HelmetIcons'
 import { COUNTRIES, CountryFlagCircle } from './components/CountryFlags'
 import {
   League,
+  LeagueRole,
   fetchAllLeagues,
   createNewLeague,
   getLocalJoinedIds,
   saveLocalJoinedIds,
+  getCurrentUserId,
+  getUserRoleInLeague,
 } from './lib/leaguesRepo'
 
 const STORAGE_KEY = 'krapp_driver_profile_v1'
@@ -36,9 +39,12 @@ export type AppView =
   | 'league-races'
   | 'league-hall-of-fame'
   | 'league-options'
+  | 'league-setting-action'
   | 'notifications'
 
 export function App() {
+  const [currentUserId] = useState<string>(() => getCurrentUserId())
+
   const [profile, setProfile] = useState<DriverProfile>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
@@ -57,10 +63,17 @@ export function App() {
     getLocalJoinedIds()
   )
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null)
+  const [selectedSettingActionTitle, setSelectedSettingActionTitle] = useState('')
+
+  // Optional role preview override on the Settings page so user can test Admin / Team Captain / Racer views easily
+  const [rolePreviewOverride, setRolePreviewOverride] = useState<LeagueRole | null>(
+    null
+  )
 
   // Create League Form State
   const [createName, setCreateName] = useState('')
   const [createCountry, setCreateCountry] = useState('')
+  const [createCountrySearch, setCreateCountrySearch] = useState('')
   const [isCreateCountryOpen, setIsCreateCountryOpen] = useState(false)
   const [createIsPrivate, setCreateIsPrivate] = useState(false)
   const [createPassword, setCreatePassword] = useState('')
@@ -69,6 +82,7 @@ export function App() {
   // Join League Search State
   const [searchLeagueQuery, setSearchLeagueQuery] = useState('')
   const [searchCountryFilter, setSearchCountryFilter] = useState('')
+  const [searchCountryInput, setSearchCountryInput] = useState('')
   const [isSearchCountryOpen, setIsSearchCountryOpen] = useState(false)
 
   // Private League Password Prompt State
@@ -109,6 +123,20 @@ export function App() {
     return matchesName && matchesCountry
   })
 
+  // Filtered countries for Create League dropdown
+  const filteredCreateCountries = COUNTRIES.filter(
+    (c) =>
+      !createCountrySearch.trim() ||
+      c.name.toLowerCase().includes(createCountrySearch.trim().toLowerCase())
+  )
+
+  // Filtered countries for Join League dropdown
+  const filteredSearchCountries = COUNTRIES.filter(
+    (c) =>
+      !searchCountryInput.trim() ||
+      c.name.toLowerCase().includes(searchCountryInput.trim().toLowerCase())
+  )
+
   const joinLeagueAndOpenHome = (league: League) => {
     if (!joinedLeagueIds.includes(league.id)) {
       const updatedIds = [league.id, ...joinedLeagueIds]
@@ -116,12 +144,14 @@ export function App() {
       saveLocalJoinedIds(updatedIds)
     }
     setSelectedLeague(league)
+    setRolePreviewOverride(null)
     setActiveView('league-detail')
   }
 
   const handleOpenCreateLeague = () => {
     setCreateName('')
     setCreateCountry('')
+    setCreateCountrySearch('')
     setIsCreateCountryOpen(false)
     setCreateIsPrivate(false)
     setCreatePassword('')
@@ -143,11 +173,13 @@ export function App() {
       return
     }
 
+    // The league creator automatically becomes the admin
     const created = await createNewLeague({
       name: createName,
       country: createCountry,
       isPrivate: createIsPrivate,
       password: createIsPrivate ? createPassword : undefined,
+      creatorUserId: currentUserId,
     })
 
     setAllLeagues((prev) => [created, ...prev])
@@ -156,16 +188,15 @@ export function App() {
     saveLocalJoinedIds(updatedJoined)
 
     setSelectedLeague(created)
+    setRolePreviewOverride(null)
     setActiveView('league-detail')
   }
 
   const handleSelectLeagueFromSearch = (league: League) => {
-    // If already joined or public, open directly (and mark joined)
     if (!league.isPrivate || joinedLeagueIds.includes(league.id)) {
       joinLeagueAndOpenHome(league)
       return
     }
-    // Private league: ask for password on dedicated screen
     setPendingJoinLeague(league)
     setJoinPasswordInput('')
     setJoinPasswordError('')
@@ -182,6 +213,16 @@ export function App() {
       setJoinPasswordError('Incorrect password')
     }
   }
+
+  const handleOpenSettingAction = (actionTitle: string) => {
+    setSelectedSettingActionTitle(actionTitle)
+    setActiveView('league-setting-action')
+  }
+
+  const actualUserRole: LeagueRole = selectedLeague
+    ? getUserRoleInLeague(selectedLeague, currentUserId)
+    : 'racer'
+  const effectiveRole: LeagueRole = rolePreviewOverride || actualUserRole
 
   return (
     <div className="min-h-screen w-full bg-[#3a3a3a] text-white flex justify-center">
@@ -325,6 +366,7 @@ export function App() {
                 onClick={() => {
                   setSearchLeagueQuery('')
                   setSearchCountryFilter('')
+                  setSearchCountryInput('')
                   setIsSearchCountryOpen(false)
                   setActiveView('join-league')
                 }}
@@ -336,7 +378,7 @@ export function App() {
               </button>
             </div>
 
-            {/* 2x2 GRID OF JOINED LEAGUES (Empty until user creates or joins a league) */}
+            {/* 2x2 GRID OF JOINED LEAGUES */}
             {myLeagues.length > 0 ? (
               <section className="grid grid-cols-2 gap-4 content-start flex-1">
                 {myLeagues.map((league) => (
@@ -345,6 +387,7 @@ export function App() {
                     type="button"
                     onClick={() => {
                       setSelectedLeague(league)
+                      setRolePreviewOverride(null)
                       setActiveView('league-detail')
                     }}
                     className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] min-h-[210px] sm:min-h-[240px] p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
@@ -393,41 +436,53 @@ export function App() {
                 />
               </div>
 
-              {/* Pill Dropdown: COUNTRY */}
+              {/* Pill Dropdown: COUNTRY (All 195+ countries with quick filter) */}
               <div className="relative w-[85%] mb-4">
                 <button
                   type="button"
                   onClick={() => setIsCreateCountryOpen((prev) => !prev)}
                   className="w-full bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
                 >
-                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate">
                     {createCountry || 'COUNTRY'}
                   </span>
                 </button>
 
                 {isCreateCountryOpen && (
-                  <div className="absolute left-2 right-2 top-13 z-30 border-2 border-neutral-400 rounded-md overflow-hidden shadow-2xl">
-                    {COUNTRIES.map((c) => {
-                      const isSelected = createCountry === c.name
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setCreateCountry(c.name)
-                            setIsCreateCountryOpen(false)
-                            setCreateError('')
-                          }}
-                          className={`w-full px-4 py-2.5 text-left font-extrabold text-sm sm:text-base tracking-wide uppercase border-b border-neutral-400 last:border-b-0 transition cursor-pointer ${
-                            isSelected
-                              ? 'bg-[#222222] text-[#32cd32]'
-                              : 'bg-[#777777] hover:bg-[#666666] text-[#32cd32]'
-                          }`}
-                        >
-                          {c.name}
-                        </button>
-                      )
-                    })}
+                  <div className="absolute left-2 right-2 top-13 z-30 border-2 border-neutral-400 rounded-md overflow-hidden shadow-2xl bg-[#777777]">
+                    <div className="bg-[#222222] px-3 py-2 border-b border-neutral-400">
+                      <input
+                        type="text"
+                        value={createCountrySearch}
+                        onChange={(e) => setCreateCountrySearch(e.target.value)}
+                        placeholder="Type country name..."
+                        autoFocus
+                        className="w-full bg-transparent text-xs font-extrabold text-[#32cd32] placeholder-neutral-500 uppercase focus:outline-none"
+                      />
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                      {filteredCreateCountries.map((c) => {
+                        const isSelected = createCountry === c.name
+                        return (
+                          <button
+                            key={c.code}
+                            type="button"
+                            onClick={() => {
+                              setCreateCountry(c.name)
+                              setIsCreateCountryOpen(false)
+                              setCreateError('')
+                            }}
+                            className={`w-full px-4 py-2.5 text-left font-extrabold text-sm sm:text-base tracking-wide uppercase border-b border-neutral-400 last:border-b-0 transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#222222] text-[#32cd32]'
+                                : 'bg-[#777777] hover:bg-[#666666] text-[#32cd32]'
+                            }`}
+                          >
+                            {c.name}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -530,54 +585,66 @@ export function App() {
                 />
               </div>
 
-              {/* SEARCH COUNTRY Dropdown */}
+              {/* SEARCH COUNTRY Dropdown (All 195+ countries) */}
               <div className="relative w-full">
                 <button
                   type="button"
                   onClick={() => setIsSearchCountryOpen((prev) => !prev)}
                   className="w-full bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
                 >
-                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate">
                     {searchCountryFilter || 'SEARCH COUNTRY'}
                   </span>
                 </button>
 
                 {isSearchCountryOpen && (
-                  <div className="absolute left-2 right-2 top-13 z-30 border-2 border-neutral-400 rounded-md overflow-hidden shadow-2xl">
-                    {searchCountryFilter && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSearchCountryFilter('')
-                          setIsSearchCountryOpen(false)
-                        }}
-                        className="w-full px-4 py-2 text-left font-extrabold text-xs tracking-wide uppercase bg-[#222222] text-neutral-300 border-b border-neutral-400 cursor-pointer"
-                      >
-                        ALL COUNTRIES
-                      </button>
-                    )}
-                    {COUNTRIES.map((c, idx) => {
-                      const isSelected =
-                        searchCountryFilter === c.name ||
-                        (!searchCountryFilter && idx === 0)
-                      return (
+                  <div className="absolute left-2 right-2 top-13 z-30 border-2 border-neutral-400 rounded-md overflow-hidden shadow-2xl bg-[#777777]">
+                    <div className="bg-[#222222] px-3 py-2 border-b border-neutral-400">
+                      <input
+                        type="text"
+                        value={searchCountryInput}
+                        onChange={(e) => setSearchCountryInput(e.target.value)}
+                        placeholder="Type country name..."
+                        autoFocus
+                        className="w-full bg-transparent text-xs font-extrabold text-[#32cd32] placeholder-neutral-500 uppercase focus:outline-none"
+                      />
+                    </div>
+                    <div className="max-h-60 overflow-y-auto">
+                      {searchCountryFilter && (
                         <button
-                          key={c.id}
                           type="button"
                           onClick={() => {
-                            setSearchCountryFilter(c.name)
+                            setSearchCountryFilter('')
                             setIsSearchCountryOpen(false)
                           }}
-                          className={`w-full px-4 py-2.5 text-left font-extrabold text-sm sm:text-base tracking-wide uppercase border-b border-neutral-400 last:border-b-0 transition cursor-pointer ${
-                            isSelected
-                              ? 'bg-[#222222] text-[#32cd32]'
-                              : 'bg-[#777777] hover:bg-[#666666] text-[#32cd32]'
-                          }`}
+                          className="w-full px-4 py-2 text-left font-extrabold text-xs tracking-wide uppercase bg-[#222222] text-neutral-300 border-b border-neutral-400 cursor-pointer"
                         >
-                          {c.name}
+                          ALL COUNTRIES
                         </button>
-                      )
-                    })}
+                      )}
+                      {filteredSearchCountries.map((c, idx) => {
+                        const isSelected =
+                          searchCountryFilter === c.name ||
+                          (!searchCountryFilter && idx === 0)
+                        return (
+                          <button
+                            key={c.code}
+                            type="button"
+                            onClick={() => {
+                              setSearchCountryFilter(c.name)
+                              setIsSearchCountryOpen(false)
+                            }}
+                            className={`w-full px-4 py-2.5 text-left font-extrabold text-sm sm:text-base tracking-wide uppercase border-b border-neutral-400 last:border-b-0 transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#222222] text-[#32cd32]'
+                                : 'bg-[#777777] hover:bg-[#666666] text-[#32cd32]'
+                            }`}
+                          >
+                            {c.name}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -710,7 +777,7 @@ export function App() {
               <button
                 type="button"
                 onClick={() => setActiveView('league-options')}
-                aria-label="League Options"
+                aria-label="League Settings"
                 className="absolute right-4 w-12 h-12 rounded-full bg-[#3a3a3a] flex items-center justify-center hover:bg-[#484848] active:scale-95 transition cursor-pointer"
               >
                 <MoreHorizontal className="w-6 h-6 text-[#32cd32]" strokeWidth={2.5} />
@@ -755,11 +822,170 @@ export function App() {
           </div>
         )}
 
+        {/* ================= LEAGUE SETTINGS SCREEN ================= */}
+        {activeView === 'league-options' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            {/* TOP PILL HEADER: LEAGUE NAME + SETTINGS */}
+            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-4">
+              <button
+                type="button"
+                onClick={() => setActiveView('league-detail')}
+                aria-label="Back to League Home Page"
+                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+
+              <div className="flex flex-col items-center justify-center text-center max-w-[70%]">
+                <h1 className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate w-full leading-tight">
+                  {selectedLeague.name}
+                </h1>
+                <span className="text-[#32cd32] font-extrabold text-sm sm:text-base tracking-wide uppercase leading-tight">
+                  SETTINGS
+                </span>
+              </div>
+            </header>
+
+            <div className="flex flex-col gap-5 flex-1 justify-start">
+              {/* 1. ONLY ADMINS BOX — Visible only when user is Admin */}
+              {effectiveRole === 'admin' && (
+                <section className="w-full rounded-[38px] border-[3.5px] border-black px-5 pt-2.5 pb-5 flex flex-col items-center gap-3.5">
+                  <span className="text-[11px] font-semibold tracking-wider uppercase text-black">
+                    ONLY ADMINS
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('UPLOAD RACE RESULTS')}
+                    className="w-full bg-[#32cd32] hover:bg-[#2dc02d] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-[#1a1a1a] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      UPLOAD RACE RESULTS
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('ASSIGN ROLES')}
+                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      ASSIGN ROLES
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('MANAGE RACERS')}
+                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      MANAGE RACERS
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('SCHEDULE RACE')}
+                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      SCHEDULE RACE
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('DELETE LEAGUE')}
+                    className="w-full bg-[#c92a2a] hover:bg-[#b52525] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-black font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      DELETE LEAGUE
+                    </span>
+                  </button>
+                </section>
+              )}
+
+              {/* 2. ONLY TEAM CAPTAINS BOX — Visible to Admins & Team Captains */}
+              {(effectiveRole === 'admin' || effectiveRole === 'team_captain') && (
+                <section className="w-full rounded-[38px] border-[3.5px] border-black px-5 pt-2.5 pb-5 flex flex-col items-center gap-3.5">
+                  <span className="text-[11px] font-semibold tracking-wider uppercase text-black">
+                    ONLY TEAM CAPTAINS
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('INVITE RACERS')}
+                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      INVITE RACERS
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenSettingAction('CREATE TEAM')}
+                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  >
+                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                      CREATE TEAM
+                    </span>
+                  </button>
+                </section>
+              )}
+
+              {/* 3. ONLY RACERS BOX — Visible to Admins, Team Captains, and Racers */}
+              <section className="w-full rounded-[38px] border-[3.5px] border-black px-5 pt-2.5 pb-5 flex flex-col items-center gap-3.5">
+                <span className="text-[11px] font-semibold tracking-wider uppercase text-black">
+                  ONLY RACERS
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenSettingAction('REQUEST TO JOIN TEAM')}
+                  className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                >
+                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    REQUEST TO JOIN TEAM
+                  </span>
+                </button>
+              </section>
+            </div>
+
+            {/* Subtle Role Preview Bar at the very bottom for testing what each role sees */}
+            <div className="mt-5 pt-2 border-t border-black/20 flex items-center justify-between text-[10px] text-neutral-400">
+              <span>
+                Your Role: <strong className="text-[#32cd32] uppercase">{actualUserRole.replace('_', ' ')}</strong>
+              </span>
+              <div className="flex items-center gap-1">
+                <span>Preview as:</span>
+                {(['admin', 'team_captain', 'racer'] as LeagueRole[]).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() =>
+                      setRolePreviewOverride(r === actualUserRole ? null : r)
+                    }
+                    className={`px-2 py-0.5 rounded-full uppercase font-bold cursor-pointer transition ${
+                      effectiveRole === r
+                        ? 'bg-[#222222] text-[#32cd32] border border-[#32cd32]/40'
+                        : 'bg-black/20 text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    {r === 'team_captain' ? 'Captain' : r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ================= PLACEHOLDER SUB-VIEWS ================= */}
         {(activeView === 'league-standing' ||
           activeView === 'league-races' ||
           activeView === 'league-hall-of-fame' ||
-          activeView === 'league-options' ||
+          activeView === 'league-setting-action' ||
           activeView === 'history' ||
           activeView === 'notifications') && (
           <div className="flex flex-col flex-1 w-full">
@@ -767,11 +993,12 @@ export function App() {
               <button
                 type="button"
                 onClick={() => {
-                  if (
+                  if (activeView === 'league-setting-action') {
+                    setActiveView('league-options')
+                  } else if (
                     activeView === 'league-standing' ||
                     activeView === 'league-races' ||
-                    activeView === 'league-hall-of-fame' ||
-                    activeView === 'league-options'
+                    activeView === 'league-hall-of-fame'
                   ) {
                     setActiveView('league-detail')
                   } else {
@@ -788,7 +1015,7 @@ export function App() {
                   {activeView === 'league-standing' && 'STANDING'}
                   {activeView === 'league-races' && 'RACES'}
                   {activeView === 'league-hall-of-fame' && 'HISTORY (HALL OF FAME)'}
-                  {activeView === 'league-options' && 'LEAGUE SETTINGS'}
+                  {activeView === 'league-setting-action' && selectedSettingActionTitle}
                   {activeView === 'history' && 'RACE HISTORY'}
                   {activeView === 'notifications' && 'NOTIFICATIONS'}
                 </h1>
@@ -796,7 +1023,7 @@ export function App() {
                   (activeView === 'league-standing' ||
                     activeView === 'league-races' ||
                     activeView === 'league-hall-of-fame' ||
-                    activeView === 'league-options') && (
+                    activeView === 'league-setting-action') && (
                     <span className="text-[#32cd32] font-extrabold text-[10px] sm:text-xs tracking-wider uppercase leading-none mt-0.5">
                       {selectedLeague.name}
                     </span>
@@ -809,7 +1036,7 @@ export function App() {
                 {activeView === 'league-standing' && `${selectedLeague?.name} — Standings`}
                 {activeView === 'league-races' && `${selectedLeague?.name} — Races & Schedules`}
                 {activeView === 'league-hall-of-fame' && `${selectedLeague?.name} — Hall of Fame`}
-                {activeView === 'league-options' && `${selectedLeague?.name} — Options`}
+                {activeView === 'league-setting-action' && selectedSettingActionTitle}
                 {activeView === 'history' && 'Race History View'}
                 {activeView === 'notifications' && 'Notifications Center'}
               </p>
@@ -819,11 +1046,12 @@ export function App() {
               <button
                 type="button"
                 onClick={() => {
-                  if (
+                  if (activeView === 'league-setting-action') {
+                    setActiveView('league-options')
+                  } else if (
                     activeView === 'league-standing' ||
                     activeView === 'league-races' ||
-                    activeView === 'league-hall-of-fame' ||
-                    activeView === 'league-options'
+                    activeView === 'league-hall-of-fame'
                   ) {
                     setActiveView('league-detail')
                   } else {
@@ -832,12 +1060,13 @@ export function App() {
                 }}
                 className="px-6 py-2.5 rounded-full bg-[#32cd32] text-black font-extrabold text-sm hover:bg-[#28b428] transition cursor-pointer"
               >
-                {activeView === 'league-standing' ||
-                activeView === 'league-races' ||
-                activeView === 'league-hall-of-fame' ||
-                activeView === 'league-options'
-                  ? `Back to ${selectedLeague?.name}`
-                  : 'Back to Homescreen'}
+                {activeView === 'league-setting-action'
+                  ? 'Back to League Settings'
+                  : activeView === 'league-standing' ||
+                      activeView === 'league-races' ||
+                      activeView === 'league-hall-of-fame'
+                    ? `Back to ${selectedLeague?.name}`
+                    : 'Back to Homescreen'}
               </button>
             </div>
           </div>
