@@ -13,11 +13,16 @@ export interface League {
   createdAt: string
 }
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+// Connected directly to your KRAPP Supabase project
+const SUPABASE_URL =
+  (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
+  'https://skxossiiffqrfejvicyl.supabase.co'
 
-export const supabase =
-  supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null
+const SUPABASE_ANON_KEY =
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+  'sb_publishable_T_lYXrPhPUy6I8OEAddLwg_yKQ_8l0j'
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 const ALL_LEAGUES_KEY = 'krapp_all_leagues_v2'
 const MY_JOINED_IDS_KEY = 'krapp_joined_league_ids_v2'
@@ -89,7 +94,7 @@ export function getUserRoleInLeague(league: League, userId: string): LeagueRole 
 }
 
 export async function fetchAllLeagues(): Promise<League[]> {
-  if (supabase) {
+  try {
     const { data, error } = await supabase
       .from('leagues')
       .select('*')
@@ -98,8 +103,8 @@ export async function fetchAllLeagues(): Promise<League[]> {
     if (!error && data) {
       const mapped: League[] = data.map((row: Record<string, unknown>) => ({
         id: String(row.id),
-        name: String(row.name),
-        country: String(row.country),
+        name: String(row.name || 'LEAGUE'),
+        country: String(row.country || 'LATVIA'),
         isPrivate: Boolean(row.is_private),
         password: row.password ? String(row.password) : undefined,
         createdByUserId: String(row.created_by_user_id || ''),
@@ -109,6 +114,11 @@ export async function fetchAllLeagues(): Promise<League[]> {
       saveLocalLeagues(mapped)
       return mapped
     }
+    if (error) {
+      console.warn('Supabase fetch warning (falling back to local cache):', error.message)
+    }
+  } catch (err) {
+    console.warn('Supabase connection error:', err)
   }
   return getLocalLeagues()
 }
@@ -133,7 +143,7 @@ export async function createNewLeague(input: {
     createdAt: new Date().toISOString(),
   }
 
-  if (supabase) {
+  try {
     const { data, error } = await supabase
       .from('leagues')
       .insert([
@@ -151,7 +161,12 @@ export async function createNewLeague(input: {
 
     if (!error && data) {
       newLeague.id = String(data.id)
+      newLeague.createdAt = String(data.created_at || newLeague.createdAt)
+    } else if (error) {
+      console.error('Supabase insert error:', error.message)
     }
+  } catch (err) {
+    console.error('Supabase insert exception:', err)
   }
 
   const current = getLocalLeagues()
