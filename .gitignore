@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# KRAPP backend (Python reference / Supabase)
+.env
+supabase/.temp/
+__pycache__/
+*.pyc

@@ -1,0 +1,11 @@
+﻿Session,Heat,Date,Race name,Driver handle,Tags,Pos,Start Number,Competitor,Class,Total Time,Diff,Laps,Best Lap,Best Lap No.,Best Speed,Penalty (s),Adjusted Total Time,Status,Overall Pos
+Quali,1,2026-11-07,Demo Race,@troy-bowden,,1,77,Troy Bowden,4SS Senior Medium,,0,6,53.378,6,70.951 km/h,,,FIN,1
+Quali,1,2026-11-07,Demo Race,@james-watson,,2,62,James Watson,4SS Senior Medium,,0.23,6,53.608,1,70.646 km/h,,,FIN,2
+Quali,1,2026-11-07,Demo Race,@lachlan-thomas,,3,54,Lachlan Thomas,4SS Senior Medium,,0.594,6,53.972,2,70.170 km/h,,,FIN,3
+Quali,1,2026-11-07,Demo Race,@warren-bentley,95kg+,4,70,Warren Bentley,4SS Senior Medium,,3.845,5,57.223,4,66.183 km/h,,,FIN,4
+Quali,1,2026-11-07,Demo Race,@terry-pryor,,5,88,Terry Pryor,4SS Senior Medium,,0,-,0,-,-,,,DNS,5
+Final,A,2026-11-07,Demo Race,@troy-bowden,,1,77,Troy Bowden,4SS Senior Medium,08:03.9,0,9,53.334,7,71.009 km/h,,,FIN,1
+Final,A,2026-11-07,Demo Race,@james-watson,,2,62,James Watson,4SS Senior Medium,08:07.5,3.628,9,53.727,2,70.490 km/h,,,FIN,2
+Final,A,2026-11-07,Demo Race,@lachlan-thomas,,3,54,Lachlan Thomas,4SS Senior Medium,08:08.1,4.198,9,53.678,4,70.554 km/h,,,FIN,3
+Final,A,2026-11-07,Demo Race,@warren-bentley,95kg+,4,70,Warren Bentley,4SS Senior Medium,08:43.8,39.933,9,57.36,8,66.025 km/h,,,FIN,4
+Final,A,2026-11-07,Demo Race,@terry-pryor,,5,88,Terry Pryor,4SS Senior Medium,0,0,-,0,-,-,,,DNS,5
