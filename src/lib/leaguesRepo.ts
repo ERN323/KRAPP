@@ -1,7 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
 import { DriverProfile } from '../components/ProfileModal'
 
-export type LeagueRole = 'admin' | 'team_captain' | 'racer'
+export type LeagueRole =
+  | 'ADMIN'
+  | 'CO-ADMIN'
+  | 'TEAM CAPTAIN'
+  | 'RACER'
+  | 'RESERVIST'
+
+export const ALL_LEAGUE_ROLES: LeagueRole[] = [
+  'ADMIN',
+  'CO-ADMIN',
+  'TEAM CAPTAIN',
+  'RACER',
+  'RESERVIST',
+]
 
 export interface League {
   id: string
@@ -11,6 +24,28 @@ export interface League {
   isPrivate: boolean
   isMember?: boolean
   myRole?: LeagueRole
+  createdAt: string
+}
+
+export interface LeagueMemberItem {
+  driverId: string
+  displayName: string
+  firstName: string
+  surname: string
+  handle: string
+  driverNumber: string
+  appRole: LeagueRole
+  joinedAt: string
+}
+
+export interface AppNotification {
+  id: string
+  leagueId: string | null
+  leagueName: string | null
+  kind: string
+  title: string
+  body: string
+  isRead: boolean
   createdAt: string
 }
 
@@ -25,10 +60,13 @@ const SUPABASE_ANON_KEY =
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-function mapDbRoleToAppRole(dbRole?: string | null): LeagueRole {
-  if (dbRole === 'owner' || dbRole === 'admin') return 'admin'
-  if (dbRole === 'organiser' || dbRole === 'team_captain') return 'team_captain'
-  return 'racer'
+export function normalizeAppRole(raw?: string | null): LeagueRole {
+  const upper = (raw || '').trim().toUpperCase()
+  if (upper === 'ADMIN' || upper === 'OWNER') return 'ADMIN'
+  if (upper === 'CO-ADMIN' || upper === 'ORGANISER') return 'CO-ADMIN'
+  if (upper === 'TEAM CAPTAIN' || upper === 'TEAM_CAPTAIN') return 'TEAM CAPTAIN'
+  if (upper === 'RESERVIST') return 'RESERVIST'
+  return 'RACER'
 }
 
 export async function signInWithGoogle() {
@@ -52,7 +90,11 @@ export async function signInWithEmail(email: string, password: string) {
   return data
 }
 
-export async function signUpWithEmail(email: string, password: string, displayName: string) {
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  displayName: string
+) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -97,6 +139,7 @@ export async function ensureAndLoadDriverProfile(userMeta?: {
     username: cleanUsername,
     name: String(data.first_name || ''),
     surname: String(data.surname || ''),
+    driverNumber: String(data.driver_number || ''),
     weightKg: data.weight_kg != null ? String(data.weight_kg) : '',
     bio: String(data.bio || ''),
     avatarType:
@@ -138,6 +181,7 @@ export async function saveDriverProfileToSupabase(
       display_name: displayName,
       first_name: profile.name.trim(),
       surname: profile.surname.trim(),
+      driver_number: (profile.driverNumber || '').trim(),
       weight_kg: profile.weightKg ? parseFloat(profile.weightKg) : null,
       bio: profile.bio.trim(),
       avatar_type: profile.avatarType,
@@ -168,7 +212,7 @@ export async function fetchAllLeagues(): Promise<League[]> {
     country: String(row.country || 'LATVIA'),
     isPrivate: Boolean(row.is_private),
     isMember: Boolean(row.is_member),
-    myRole: mapDbRoleToAppRole(row.my_role as string | null),
+    myRole: normalizeAppRole(row.my_role as string | null),
     createdAt: String(row.created_at || new Date().toISOString()),
   }))
 }
@@ -198,7 +242,7 @@ export async function createNewLeague(input: {
     country: String(row.country),
     isPrivate: Boolean(row.is_private),
     isMember: true,
-    myRole: 'admin',
+    myRole: 'ADMIN',
     createdAt: String(row.created_at || new Date().toISOString()),
   }
 }
@@ -216,5 +260,73 @@ export async function joinLeagueInSupabase(
     throw new Error(error.message)
   }
 
-  return mapDbRoleToAppRole(String(data))
+  return normalizeAppRole(String(data))
+}
+
+export async function fetchLeagueMembers(
+  leagueId: string
+): Promise<LeagueMemberItem[]> {
+  const { data, error } = await supabase.rpc('fn_list_league_members', {
+    p_league_id: leagueId,
+  })
+
+  if (error) {
+    console.warn('Error fetching league members:', error.message)
+    return []
+  }
+
+  if (!Array.isArray(data)) return []
+
+  return data.map((row: Record<string, unknown>, idx: number) => ({
+    driverId: String(row.driver_id),
+    displayName: String(row.display_name || 'DRIVER'),
+    firstName: String(row.first_name || ''),
+    surname: String(row.surname || ''),
+    handle: String(row.handle || '@driver'),
+    driverNumber: String(row.driver_number || String(idx + 1)),
+    appRole: normalizeAppRole(row.app_role as string | null),
+    joinedAt: String(row.joined_at || new Date().toISOString()),
+  }))
+}
+
+export async function assignLeagueMemberRole(
+  leagueId: string,
+  targetDriverId: string,
+  newRole: LeagueRole
+): Promise<void> {
+  const { error } = await supabase.rpc('fn_assign_league_role', {
+    p_league_id: leagueId,
+    p_target_driver_id: targetDriverId,
+    p_new_app_role: newRole,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
+
+export async function fetchMyNotifications(): Promise<AppNotification[]> {
+  const { data, error } = await supabase.rpc('fn_get_my_notifications')
+
+  if (error) {
+    console.warn('Error fetching notifications:', error.message)
+    return []
+  }
+
+  if (!Array.isArray(data)) return []
+
+  return data.map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    leagueId: row.league_id ? String(row.league_id) : null,
+    leagueName: row.league_name ? String(row.league_name) : null,
+    kind: String(row.kind || 'ROLE_CHANGE'),
+    title: String(row.title || 'Notification'),
+    body: String(row.body || ''),
+    isRead: Boolean(row.is_read),
+    createdAt: String(row.created_at || new Date().toISOString()),
+  }))
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await supabase.rpc('fn_mark_notifications_read')
 }

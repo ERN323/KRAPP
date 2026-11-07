@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react'
-import { X, Upload, Check, Scale, User, FileText, AtSign } from 'lucide-react'
+import { X, Upload, Check, Scale, User, FileText, AtSign, Hash } from 'lucide-react'
 import { HELMET_OPTIONS, HelmetSvg } from './HelmetIcons'
 
 export interface DriverProfile {
   username: string
   name: string
   surname: string
+  driverNumber?: string
   weightKg: string
   bio: string
   avatarType: 'helmet' | 'custom' | 'none'
@@ -70,7 +71,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               DRIVER <span className="text-[#FF6B00]">PROFILE</span>
             </h2>
             <p className="text-xs text-[#8A99AD]">
-              Customize your racing identity & telemetry weight
+              Customize your racing identity, driver number & weight
             </p>
           </div>
           <button
@@ -83,7 +84,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 mt-5">
+        <form onSubmit={handleSubmit} className="space-y-4 mt-5">
           {/* Avatar Preview & Picker */}
           <div className="flex flex-col items-center">
             <div className="w-28 h-28 rounded-full bg-[#14191E] border-2 border-[#FF6B00] flex items-center justify-center overflow-hidden shadow-lg shadow-[#FF6B00]/10 mb-3">
@@ -211,28 +212,48 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </div>
           </div>
 
-          {/* Weight (kg) */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-[#8A99AD] mb-1.5">
-              Driver Weight (kg)
-            </label>
-            <div className="relative">
-              <Scale className="w-4 h-4 text-[#8A99AD] absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="number"
-                step="0.5"
-                min="20"
-                max="200"
-                value={formData.weightKg}
-                onChange={(e) =>
-                  setFormData({ ...formData, weightKg: e.target.value })
-                }
-                placeholder="e.g. 76.5"
-                className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl pl-10 pr-12 py-2.5 text-sm text-white focus:outline-none focus:border-[#FF6B00]"
-              />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-[#FF6B00]">
-                KG
-              </span>
+          {/* Driver Number & Weight (kg) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#8A99AD] mb-1.5">
+                Driver Number
+              </label>
+              <div className="relative">
+                <Hash className="w-4 h-4 text-[#FF6B00] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={formData.driverNumber || ''}
+                  onChange={(e) =>
+                    setFormData({ ...formData, driverNumber: e.target.value })
+                  }
+                  placeholder="e.g. 44"
+                  className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl pl-10 pr-3 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#FF6B00]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#8A99AD] mb-1.5">
+                Weight (kg)
+              </label>
+              <div className="relative">
+                <Scale className="w-4 h-4 text-[#8A99AD] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="number"
+                  step="0.5"
+                  min="20"
+                  max="200"
+                  value={formData.weightKg}
+                  onChange={(e) =>
+                    setFormData({ ...formData, weightKg: e.target.value })
+                  }
+                  placeholder="e.g. 76.5"
+                  className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl pl-10 pr-10 py-2.5 text-sm text-white focus:outline-none focus:border-[#FF6B00]"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[#FF6B00]">
+                  KG
+                </span>
+              </div>
             </div>
           </div>
 

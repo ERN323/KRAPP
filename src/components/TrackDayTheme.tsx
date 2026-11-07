@@ -9,6 +9,7 @@ interface TrackDayHeaderProps {
   onBellClick?: () => void
   onMoreClick?: () => void
   showMoreButton?: boolean
+  unreadNotificationsCount?: number
 }
 
 export const TrackDayHeader: React.FC<TrackDayHeaderProps> = ({
@@ -19,6 +20,7 @@ export const TrackDayHeader: React.FC<TrackDayHeaderProps> = ({
   onBellClick,
   onMoreClick,
   showMoreButton = false,
+  unreadNotificationsCount = 0,
 }) => {
   return (
     <div className="w-full mb-5">
@@ -78,7 +80,13 @@ export const TrackDayHeader: React.FC<TrackDayHeaderProps> = ({
             className="relative w-9 h-9 rounded-lg flex items-center justify-center text-[#8A99AD] hover:text-white hover:bg-white/5 active:scale-95 transition cursor-pointer"
           >
             <Bell className="w-5 h-5 fill-[#8A99AD]/40" />
-            <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-[#38BDF8] ring-2 ring-[#14191E]" />
+            {unreadNotificationsCount > 0 ? (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[#FF6B00] text-black text-[9px] font-extrabold flex items-center justify-center ring-2 ring-[#14191E]">
+                {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+              </span>
+            ) : (
+              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-[#38BDF8] ring-2 ring-[#14191E]" />
+            )}
           </button>
         )}
       </header>

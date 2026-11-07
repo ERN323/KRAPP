@@ -17,6 +17,8 @@ import {
   ChevronDown,
   Search,
   LogOut,
+  BellRing,
+  CheckCircle2,
 } from 'lucide-react'
 import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
@@ -28,11 +30,18 @@ import {
   supabase,
   League,
   LeagueRole,
+  ALL_LEAGUE_ROLES,
+  LeagueMemberItem,
+  AppNotification,
   fetchAllLeagues,
   createNewLeague,
   joinLeagueInSupabase,
   ensureAndLoadDriverProfile,
   saveDriverProfileToSupabase,
+  fetchLeagueMembers,
+  assignLeagueMemberRole,
+  fetchMyNotifications,
+  markAllNotificationsRead,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -42,6 +51,7 @@ const DEFAULT_PROFILE: DriverProfile = {
   username: 'USERNAME',
   name: '',
   surname: '',
+  driverNumber: '',
   weightKg: '',
   bio: '',
   avatarType: 'none',
@@ -61,6 +71,7 @@ export type AppView =
   | 'league-races'
   | 'league-hall-of-fame'
   | 'league-options'
+  | 'assign-roles'
   | 'league-setting-action'
   | 'notifications'
 
@@ -89,6 +100,18 @@ export function App() {
   const [rolePreviewOverride, setRolePreviewOverride] = useState<LeagueRole | null>(
     null
   )
+
+  // Assign Roles Screen State
+  const [leagueMembers, setLeagueMembers] = useState<LeagueMemberItem[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(false)
+  const [memberSearchQuery, setMemberSearchQuery] = useState('')
+  const [selectedMemberForRole, setSelectedMemberForRole] =
+    useState<LeagueMemberItem | null>(null)
+  const [assigningRoleLoading, setAssigningRoleLoading] = useState(false)
+  const [roleAssignSuccessMsg, setRoleAssignSuccessMsg] = useState('')
+
+  // Notifications State
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   // Create League Form State
   const [createName, setCreateName] = useState('')
@@ -128,7 +151,7 @@ export function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Whenever the user signs in, ensure their `drivers` row exists in Supabase and load all leagues
+  // Whenever the user signs in, ensure their `drivers` row exists in Supabase, load all leagues & notifications
   useEffect(() => {
     if (!session?.user) return
 
@@ -144,14 +167,28 @@ export function App() {
     })
 
     fetchAllLeagues().then((loaded) => setAllLeagues(loaded))
+    fetchMyNotifications().then((loaded) => setNotifications(loaded))
   }, [session])
 
-  // Refresh leagues when navigating to `leagues` or `join-league`
+  // Refresh leagues or notifications when navigating
   useEffect(() => {
-    if (session && (activeView === 'leagues' || activeView === 'join-league')) {
+    if (!session) return
+    if (activeView === 'leagues' || activeView === 'join-league') {
       fetchAllLeagues().then((loaded) => setAllLeagues(loaded))
     }
+    if (activeView === 'home' || activeView === 'notifications') {
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    }
   }, [activeView, session])
+
+  const unreadNotificationsCount = notifications.filter((n) => !n.isRead).length
+
+  const handleOpenNotifications = async () => {
+    setActiveView('notifications')
+    const latest = await fetchMyNotifications()
+    setNotifications(latest.map((n) => ({ ...n, isRead: true })))
+    await markAllNotificationsRead()
+  }
 
   const handleSaveProfile = async (updated: DriverProfile) => {
     setProfile(updated)
@@ -212,6 +249,25 @@ export function App() {
       c.name.toLowerCase().includes(searchCountryInput.trim().toLowerCase())
   )
 
+  // Format a member row as "NAME SURNAME - NUMBER" matching the skeleton mockup
+  const formatMemberLabel = (member: LeagueMemberItem, index: number) => {
+    const fullName =
+      `${member.firstName} ${member.surname}`.trim() ||
+      member.displayName ||
+      member.handle.replace(/^@/, '')
+    const num = member.driverNumber.trim() || String(index + 1)
+    return `${fullName.toUpperCase()} - ${num}`
+  }
+
+  // Filtered league members for "ASSIGN ROLES" search box
+  const filteredLeagueMembers = leagueMembers.filter((member, idx) => {
+    if (!memberSearchQuery.trim()) return true
+    const label = formatMemberLabel(member, idx).toLowerCase()
+    const handle = member.handle.toLowerCase()
+    const q = memberSearchQuery.trim().toLowerCase()
+    return label.includes(q) || handle.includes(q)
+  })
+
   const handleOpenCreateLeague = () => {
     setCreateName('')
     setCreateCountry('')
@@ -262,7 +318,6 @@ export function App() {
   }
 
   const handleSelectLeagueFromSearch = async (league: League) => {
-    // If user is already a member, open directly
     if (league.isMember) {
       setSelectedLeague(league)
       setRolePreviewOverride(null)
@@ -270,7 +325,6 @@ export function App() {
       return
     }
 
-    // If public league, join directly in Supabase and open
     if (!league.isPrivate) {
       try {
         const assignedRole = await joinLeagueInSupabase(league.id)
@@ -291,7 +345,6 @@ export function App() {
       return
     }
 
-    // Private league: ask for password on dedicated screen
     setPendingJoinLeague(league)
     setJoinPasswordInput('')
     setJoinPasswordError('')
@@ -326,13 +379,68 @@ export function App() {
     }
   }
 
+  const handleOpenAssignRoles = async () => {
+    if (!selectedLeague) return
+    setMemberSearchQuery('')
+    setSelectedMemberForRole(null)
+    setRoleAssignSuccessMsg('')
+    setActiveView('assign-roles')
+    setLoadingMembers(true)
+    const members = await fetchLeagueMembers(selectedLeague.id)
+    setLeagueMembers(members)
+    setLoadingMembers(false)
+  }
+
+  const handleAssignRoleToMember = async (newRole: LeagueRole) => {
+    if (!selectedLeague || !selectedMemberForRole) return
+    setAssigningRoleLoading(true)
+    setRoleAssignSuccessMsg('')
+    try {
+      await assignLeagueMemberRole(
+        selectedLeague.id,
+        selectedMemberForRole.driverId,
+        newRole
+      )
+
+      const updatedMember: LeagueMemberItem = {
+        ...selectedMemberForRole,
+        appRole: newRole,
+      }
+      setSelectedMemberForRole(updatedMember)
+      setLeagueMembers((prev) =>
+        prev.map((m) =>
+          m.driverId === updatedMember.driverId ? updatedMember : m
+        )
+      )
+      setRoleAssignSuccessMsg(
+        `Assigned ${newRole} & sent notification to ${
+          updatedMember.displayName || updatedMember.handle
+        }`
+      )
+      // Also refresh notifications in case Admin changed their own role while testing
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to assign role')
+    } finally {
+      setAssigningRoleLoading(false)
+    }
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
+    if (actionTitle === 'ASSIGN ROLES') {
+      handleOpenAssignRoles()
+      return
+    }
     setSelectedSettingActionTitle(actionTitle)
     setActiveView('league-setting-action')
   }
 
-  const actualUserRole: LeagueRole = selectedLeague?.myRole || 'racer'
+  const actualUserRole: LeagueRole = selectedLeague?.myRole || 'RACER'
   const effectiveRole: LeagueRole = rolePreviewOverride || actualUserRole
+  const isEffectiveAdmin =
+    effectiveRole === 'ADMIN' || effectiveRole === 'CO-ADMIN'
+  const isEffectiveCaptainOrAbove =
+    isEffectiveAdmin || effectiveRole === 'TEAM CAPTAIN'
 
   // Reusable Track Day Pro League Card component
   const renderLeagueCard = (
@@ -343,7 +451,7 @@ export function App() {
   ) => {
     const isCyanAccent = idx % 4 === 3
     const accentColorClass = isCyanAccent ? 'text-[#38BDF8]' : 'text-[#FF6B00]'
-    const userRoleInCard = league.myRole || 'racer'
+    const userRoleInCard = league.myRole || 'RACER'
 
     return (
       <button
@@ -410,11 +518,7 @@ export function App() {
                   : league.isPrivate
                     ? 'Locked'
                     : 'Open'
-                : userRoleInCard === 'admin'
-                  ? 'Admin'
-                  : userRoleInCard === 'team_captain'
-                    ? 'Captain'
-                    : 'Racer'}
+                : userRoleInCard}
             </span>
           </div>
           {showAccessBadge ? (
@@ -442,7 +546,8 @@ export function App() {
               sectionTitle={`@${profile.username}`}
               sectionSubtitle="DRIVER DASHBOARD"
               onMenuClick={() => setIsProfileModalOpen(true)}
-              onBellClick={() => setActiveView('notifications')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
 
             {/* CENTRAL AVATAR MODULE (Tappable to edit profile) */}
@@ -464,7 +569,8 @@ export function App() {
                       <HelmetSvg helmet={selectedHelmet} className="w-32 h-32" />
                       {(profile.name || profile.surname) && (
                         <span className="mt-2 font-display text-lg font-extrabold tracking-wider text-white uppercase">
-                          {profile.name} {profile.surname}
+                          {profile.name} {profile.surname}{' '}
+                          {profile.driverNumber ? `#${profile.driverNumber}` : ''}
                         </span>
                       )}
                       {profile.weightKg && (
@@ -483,7 +589,7 @@ export function App() {
                         DRIVER AVATAR
                       </span>
                       <p className="text-[11px] font-semibold text-[#8A99AD] leading-snug max-w-[170px] mt-1">
-                        Tap to edit profile, weight & helmet
+                        Tap to edit profile, number, weight & helmet
                       </p>
                     </div>
                   )}
@@ -505,6 +611,7 @@ export function App() {
                     {profile.name || profile.surname
                       ? `${profile.name} ${profile.surname}`.trim()
                       : `@${profile.username}`}
+                    {profile.driverNumber ? ` - ${profile.driverNumber}` : ''}
                   </strong>
                 </span>
                 <span className="text-[#2A323B]">|</span>
@@ -591,7 +698,8 @@ export function App() {
             <TrackDayHeader
               sectionTitle="MY LEAGUES"
               onBack={() => setActiveView('home')}
-              onBellClick={() => setActiveView('notifications')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
 
             {/* ACTION PILL BUTTONS: Orange CREATE LEAGUE + & Outlined JOIN LEAGUE */}
@@ -656,7 +764,8 @@ export function App() {
               <TrackDayHeader
                 sectionTitle="CREATE LEAGUE +"
                 onBack={() => setActiveView('leagues')}
-                onBellClick={() => setActiveView('notifications')}
+                onBellClick={handleOpenNotifications}
+                unreadNotificationsCount={unreadNotificationsCount}
               />
 
               <div className="px-5 flex flex-col gap-4 mt-2">
@@ -834,7 +943,8 @@ export function App() {
             <TrackDayHeader
               sectionTitle="JOIN LEAGUE"
               onBack={() => setActiveView('leagues')}
-              onBellClick={() => setActiveView('notifications')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
 
             {/* Search Controls: SEARCH LEAGUE & SEARCH COUNTRY */}
@@ -950,7 +1060,8 @@ export function App() {
               sectionTitle={pendingJoinLeague.name}
               sectionSubtitle="PRIVATE LEAGUE ACCESS"
               onBack={() => setActiveView('join-league')}
-              onBellClick={() => setActiveView('notifications')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
 
             <div className="px-6 flex flex-col items-center flex-1 justify-center">
@@ -1092,12 +1203,13 @@ export function App() {
               sectionTitle={selectedLeague.name}
               sectionSubtitle="SETTINGS"
               onBack={() => setActiveView('league-detail')}
-              onBellClick={() => setActiveView('notifications')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
 
             <div className="flex flex-col gap-4 px-5 flex-1 justify-start">
-              {/* 1. ONLY ADMINS BOX — Visible only when user is Admin/Owner */}
-              {effectiveRole === 'admin' && (
+              {/* 1. ONLY ADMINS BOX — Visible only when user is ADMIN or CO-ADMIN */}
+              {isEffectiveAdmin && (
                 <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
                   <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
                     <span className="text-[10px] font-extrabold tracking-widest uppercase text-[#FF6B00]">
@@ -1122,8 +1234,8 @@ export function App() {
 
                   <button
                     type="button"
-                    onClick={() => handleOpenSettingAction('ASSIGN ROLES')}
-                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
+                    onClick={handleOpenAssignRoles}
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <UserCog className="w-4 h-4 text-[#FF6B00]" />
                     <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
@@ -1167,7 +1279,7 @@ export function App() {
               )}
 
               {/* 2. ONLY TEAM CAPTAINS BOX — Visible to Admins & Team Captains */}
-              {(effectiveRole === 'admin' || effectiveRole === 'team_captain') && (
+              {isEffectiveCaptainOrAbove && (
                 <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
                   <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
                     <span className="text-[10px] font-extrabold tracking-widest uppercase text-[#38BDF8]">
@@ -1202,7 +1314,7 @@ export function App() {
                 </section>
               )}
 
-              {/* 3. ONLY RACERS BOX — Visible to Admins, Team Captains, and Racers */}
+              {/* 3. ONLY RACERS BOX — Visible to Everyone */}
               <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
                 <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
                   <span className="text-[10px] font-extrabold tracking-widest uppercase text-[#8A99AD]">
@@ -1229,14 +1341,11 @@ export function App() {
             {/* Subtle Role Preview Bar at the bottom for testing what each role sees */}
             <div className="mx-5 mt-5 pt-3 border-t border-[#2A323B] flex items-center justify-between text-[10px] text-[#8A99AD]">
               <span>
-                Role:{' '}
-                <strong className="text-[#FF6B00] uppercase">
-                  {actualUserRole.replace('_', ' ')}
-                </strong>
+                Role: <strong className="text-[#FF6B00] uppercase">{actualUserRole}</strong>
               </span>
               <div className="flex items-center gap-1">
                 <span>View as:</span>
-                {(['admin', 'team_captain', 'racer'] as LeagueRole[]).map((r) => (
+                {(['ADMIN', 'TEAM CAPTAIN', 'RACER'] as LeagueRole[]).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -1249,10 +1358,206 @@ export function App() {
                         : 'bg-[#1C2228] text-[#8A99AD] hover:text-white'
                     }`}
                   >
-                    {r === 'team_captain' ? 'Captain' : r}
+                    {r === 'TEAM CAPTAIN' ? 'Captain' : r}
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 8. ASSIGN ROLES SCREEN (Matches Both States in Mockup) ================= */}
+        {activeView === 'assign-roles' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="SETTINGS"
+              onBack={() => {
+                if (selectedMemberForRole) {
+                  setSelectedMemberForRole(null)
+                  setRoleAssignSuccessMsg('')
+                } else {
+                  setActiveView('league-options')
+                }
+              }}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            {/* Outer Container: ASSIGN ROLES */}
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col">
+              <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center mb-3">
+                ASSIGN ROLES
+              </h2>
+
+              {/* Search Pill: SEARCH NAME - NUMBER */}
+              <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-4 shadow-inner">
+                <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                <input
+                  type="text"
+                  value={memberSearchQuery}
+                  onChange={(e) => {
+                    setMemberSearchQuery(e.target.value)
+                    if (selectedMemberForRole) {
+                      setSelectedMemberForRole(null)
+                      setRoleAssignSuccessMsg('')
+                    }
+                  }}
+                  placeholder="SEARCH NAME - NUMBER"
+                  className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                />
+              </div>
+
+              {/* Inner Box: Either Member List (Left Mockup) OR Selected Member + 5 Role Pills (Right Mockup) */}
+              <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col">
+                {loadingMembers ? (
+                  <div className="flex-1 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
+                    Loading league members...
+                  </div>
+                ) : selectedMemberForRole ? (
+                  /* STATE 2 (Right Mockup): Selected Member Pill + 5 Role Options Box */
+                  <div className="flex flex-col flex-1">
+                    {/* Selected Member Pill (Click to go back to full member list) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedMemberForRole(null)
+                        setRoleAssignSuccessMsg('')
+                      }}
+                      className="w-full bg-[#1C2228] border border-[#FF6B00] rounded-full h-11 px-5 flex items-center justify-between mb-4 shadow-md cursor-pointer"
+                    >
+                      <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate">
+                        {formatMemberLabel(
+                          selectedMemberForRole,
+                          leagueMembers.findIndex(
+                            (m) => m.driverId === selectedMemberForRole.driverId
+                          )
+                        )}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase text-[#8A99AD]">
+                        Change driver
+                      </span>
+                    </button>
+
+                    {/* Nested Role Options Container matching Right Mockup */}
+                    <div className="bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col gap-3">
+                      {ALL_LEAGUE_ROLES.map((roleOption) => {
+                        const isCurrentRole =
+                          selectedMemberForRole.appRole === roleOption
+                        return (
+                          <button
+                            key={roleOption}
+                            type="button"
+                            disabled={assigningRoleLoading}
+                            onClick={() => handleAssignRoleToMember(roleOption)}
+                            className={`w-full rounded-full h-11 px-5 flex items-center justify-center relative transition-all cursor-pointer disabled:opacity-50 ${
+                              isCurrentRole
+                                ? 'bg-[#FF6B00] text-black border-2 border-white shadow-lg shadow-[#FF6B00]/25'
+                                : 'bg-[#14191E] hover:bg-[#222930] text-[#FF6B00] border border-[#2A323B] hover:border-[#FF6B00]/60'
+                            }`}
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider uppercase">
+                              {roleOption}
+                            </span>
+                            {isCurrentRole && (
+                              <Check className="w-4 h-4 text-black stroke-[3] absolute right-4" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {roleAssignSuccessMsg && (
+                      <div className="mt-4 flex items-center gap-2 bg-[#38BDF8]/10 border border-[#38BDF8]/40 rounded-2xl p-3 text-xs text-[#38BDF8] font-semibold">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{roleAssignSuccessMsg}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : filteredLeagueMembers.length > 0 ? (
+                  /* STATE 1 (Left Mockup): List of Members in the League */
+                  <div className="flex flex-col gap-3 overflow-y-auto">
+                    {filteredLeagueMembers.map((member, idx) => (
+                      <button
+                        key={member.driverId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMemberForRole(member)
+                          setRoleAssignSuccessMsg('')
+                        }}
+                        className="w-full bg-[#1C2228] hover:bg-[#242C35] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-between shadow-md cursor-pointer"
+                      >
+                        <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate">
+                          {formatMemberLabel(member, idx)}
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#14191E] border border-[#2A323B] text-[#8A99AD] shrink-0 ml-2">
+                          {member.appRole}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+                    <p className="font-display font-extrabold text-base text-white uppercase tracking-wider mb-1">
+                      NO MEMBERS MATCHING SEARCH
+                    </p>
+                    <p className="text-xs text-[#8A99AD]">
+                      Try searching by driver name, handle, or driver number.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 9. NOTIFICATIONS SCREEN (Bell on Homescreen) ================= */}
+        {activeView === 'notifications' && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle="NOTIFICATIONS"
+              sectionSubtitle="ROLE & LEAGUE UPDATES"
+              onBack={() => setActiveView('home')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={0}
+            />
+
+            <div className="px-5 flex-1 flex flex-col gap-3">
+              {notifications.length > 0 ? (
+                notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className="bg-[#1C2228] border border-[#2A323B] rounded-2xl p-4 flex items-start gap-3.5 shadow-lg"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-[#FF6B00]/15 border border-[#FF6B00]/40 flex items-center justify-center text-[#FF6B00] shrink-0 mt-0.5">
+                      <BellRing className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-display font-extrabold text-base tracking-wide text-white uppercase truncate">
+                          {n.title}
+                        </span>
+                        <span className="text-[10px] text-[#8A99AD] shrink-0">
+                          {new Date(n.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#8A99AD] mt-1 leading-relaxed">
+                        {n.body}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center justify-center text-center">
+                  <BellRing className="w-10 h-10 text-[#8A99AD]/50 mb-3" />
+                  <p className="font-display font-extrabold text-lg text-white uppercase tracking-wider mb-1">
+                    NO NOTIFICATIONS YET
+                  </p>
+                  <p className="text-xs text-[#8A99AD] max-w-xs">
+                    When an Admin updates your role in a league, you will see the alert right here.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1262,8 +1567,7 @@ export function App() {
           activeView === 'league-races' ||
           activeView === 'league-hall-of-fame' ||
           activeView === 'league-setting-action' ||
-          activeView === 'history' ||
-          activeView === 'notifications') && (
+          activeView === 'history') && (
           <div className="flex flex-col flex-1 w-full">
             <TrackDayHeader
               sectionTitle={
@@ -1275,9 +1579,7 @@ export function App() {
                       ? 'HALL OF FAME'
                       : activeView === 'league-setting-action'
                         ? selectedSettingActionTitle
-                        : activeView === 'history'
-                          ? 'RACE HISTORY'
-                          : 'NOTIFICATIONS'
+                        : 'RACE HISTORY'
               }
               sectionSubtitle={selectedLeague?.name}
               onBack={() => {
@@ -1293,7 +1595,8 @@ export function App() {
                   setActiveView('home')
                 }
               }}
-              onBellClick={() => setActiveView('notifications')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
 
             <div className="flex-1 mx-5 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-lg">
@@ -1305,7 +1608,6 @@ export function App() {
                   `${selectedLeague?.name} — Hall of Fame`}
                 {activeView === 'league-setting-action' && selectedSettingActionTitle}
                 {activeView === 'history' && 'Race History View'}
-                {activeView === 'notifications' && 'Notifications Center'}
               </p>
               <p className="text-xs text-[#8A99AD] max-w-xs mb-6">
                 Ready for your next skeleton mockup — I will build it in this Track Day Pro design!
