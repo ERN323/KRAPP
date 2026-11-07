@@ -143,12 +143,21 @@ export async function createNewLeague(input: {
     createdAt: new Date().toISOString(),
   }
 
+  const slug =
+    newLeague.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') +
+    '-' +
+    Math.random().toString(36).substring(2, 7)
+
   try {
     const { data, error } = await supabase
       .from('leagues')
       .insert([
         {
           name: newLeague.name,
+          slug,
           country: newLeague.country,
           is_private: newLeague.isPrivate,
           password: newLeague.password || null,
