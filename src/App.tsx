@@ -16,20 +16,24 @@ import {
   Send,
   ChevronDown,
   Search,
+  LogOut,
 } from 'lucide-react'
+import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
 import { HELMET_OPTIONS, HelmetSvg } from './components/HelmetIcons'
 import { COUNTRIES, CountryFlagCircle } from './components/CountryFlags'
 import { TrackDayHeader, CardGraphicSvg } from './components/TrackDayTheme'
+import { AuthScreen } from './components/AuthScreen'
 import {
+  supabase,
   League,
   LeagueRole,
   fetchAllLeagues,
   createNewLeague,
-  getLocalJoinedIds,
-  saveLocalJoinedIds,
-  getCurrentUserId,
-  getUserRoleInLeague,
+  joinLeagueInSupabase,
+  ensureAndLoadDriverProfile,
+  saveDriverProfileToSupabase,
+  signOutUser,
 } from './lib/leaguesRepo'
 
 const STORAGE_KEY = 'krapp_driver_profile_v1'
@@ -61,7 +65,8 @@ export type AppView =
   | 'notifications'
 
 export function App() {
-  const [currentUserId] = useState<string>(() => getCurrentUserId())
+  const [session, setSession] = useState<Session | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
 
   const [profile, setProfile] = useState<DriverProfile>(() => {
     try {
@@ -75,11 +80,8 @@ export function App() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('home')
 
-  // Leagues state (Supabase + LocalStorage fallback)
+  // Leagues state synced directly with Supabase (`leagues` + `league_members`)
   const [allLeagues, setAllLeagues] = useState<League[]>([])
-  const [joinedLeagueIds, setJoinedLeagueIds] = useState<string[]>(() =>
-    getLocalJoinedIds()
-  )
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null)
   const [selectedSettingActionTitle, setSelectedSettingActionTitle] = useState('')
 
@@ -96,6 +98,7 @@ export function App() {
   const [createIsPrivate, setCreateIsPrivate] = useState(false)
   const [createPassword, setCreatePassword] = useState('')
   const [createError, setCreateError] = useState('')
+  const [isSubmittingLeague, setIsSubmittingLeague] = useState(false)
 
   // Join League Search State
   const [searchLeagueQuery, setSearchLeagueQuery] = useState('')
@@ -108,17 +111,71 @@ export function App() {
   const [joinPasswordInput, setJoinPasswordInput] = useState('')
   const [joinPasswordError, setJoinPasswordError] = useState('')
 
+  // Listen to Supabase Auth session (Google OAuth + Email)
   useEffect(() => {
-    fetchAllLeagues().then((loaded) => setAllLeagues(loaded))
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      setSession(currentSession)
+      setAuthLoading(false)
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession)
+      setAuthLoading(false)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
+  // Whenever the user signs in, ensure their `drivers` row exists in Supabase and load all leagues
   useEffect(() => {
+    if (!session?.user) return
+
+    const meta = session.user.user_metadata || {}
+    ensureAndLoadDriverProfile({
+      fullName: meta.full_name || meta.name,
+      email: session.user.email,
+      avatarUrl: meta.avatar_url || meta.picture,
+    }).then((dbProfile) => {
+      if (dbProfile) {
+        setProfile(dbProfile)
+      }
+    })
+
+    fetchAllLeagues().then((loaded) => setAllLeagues(loaded))
+  }, [session])
+
+  // Refresh leagues when navigating to `leagues` or `join-league`
+  useEffect(() => {
+    if (session && (activeView === 'leagues' || activeView === 'join-league')) {
+      fetchAllLeagues().then((loaded) => setAllLeagues(loaded))
+    }
+  }, [activeView, session])
+
+  const handleSaveProfile = async (updated: DriverProfile) => {
+    setProfile(updated)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(profile))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
     } catch (e) {
       console.error('Failed to save profile to localStorage', e)
     }
-  }, [profile])
+    await saveDriverProfileToSupabase(updated)
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen w-full bg-[#0d1114] text-white flex items-center justify-center">
+        <span className="font-display font-extrabold text-xl tracking-wider text-[#FF6B00] uppercase animate-pulse">
+          LOADING KRAPP TELEMETRY...
+        </span>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return <AuthScreen />
+  }
 
   const selectedHelmet =
     HELMET_OPTIONS.find((h) => h.id === profile.helmetId) || HELMET_OPTIONS[0]
@@ -127,10 +184,10 @@ export function App() {
     profile.avatarType !== 'none' ||
     Boolean(profile.name || profile.surname || profile.weightKg || profile.bio)
 
-  // Only show leagues the user has created or joined in "MY LEAGUES"
-  const myLeagues = allLeagues.filter((l) => joinedLeagueIds.includes(l.id))
+  // Only show leagues the user is a member of in "MY LEAGUES"
+  const myLeagues = allLeagues.filter((l) => l.isMember)
 
-  // Filtered leagues in "JOIN LEAGUE" search screen
+  // All leagues in "JOIN LEAGUE" search screen
   const filteredSearchLeagues = allLeagues.filter((league) => {
     const matchesName =
       !searchLeagueQuery.trim() ||
@@ -154,17 +211,6 @@ export function App() {
       !searchCountryInput.trim() ||
       c.name.toLowerCase().includes(searchCountryInput.trim().toLowerCase())
   )
-
-  const joinLeagueAndOpenHome = (league: League) => {
-    if (!joinedLeagueIds.includes(league.id)) {
-      const updatedIds = [league.id, ...joinedLeagueIds]
-      setJoinedLeagueIds(updatedIds)
-      saveLocalJoinedIds(updatedIds)
-    }
-    setSelectedLeague(league)
-    setRolePreviewOverride(null)
-    setActiveView('league-detail')
-  }
 
   const handleOpenCreateLeague = () => {
     setCreateName('')
@@ -191,43 +237,92 @@ export function App() {
       return
     }
 
-    const created = await createNewLeague({
-      name: createName,
-      country: createCountry,
-      isPrivate: createIsPrivate,
-      password: createIsPrivate ? createPassword : undefined,
-      creatorUserId: currentUserId,
-    })
+    setIsSubmittingLeague(true)
+    setCreateError('')
+    try {
+      const created = await createNewLeague({
+        name: createName,
+        country: createCountry,
+        isPrivate: createIsPrivate,
+        password: createIsPrivate ? createPassword : undefined,
+      })
 
-    setAllLeagues((prev) => [created, ...prev])
-    const updatedJoined = [created.id, ...joinedLeagueIds]
-    setJoinedLeagueIds(updatedJoined)
-    saveLocalJoinedIds(updatedJoined)
-
-    setSelectedLeague(created)
-    setRolePreviewOverride(null)
-    setActiveView('league-detail')
+      const refreshed = await fetchAllLeagues()
+      setAllLeagues(refreshed.length > 0 ? refreshed : [created, ...allLeagues])
+      setSelectedLeague(created)
+      setRolePreviewOverride(null)
+      setActiveView('league-detail')
+    } catch (err: unknown) {
+      setCreateError(
+        err instanceof Error ? err.message : 'Failed to create league in Supabase'
+      )
+    } finally {
+      setIsSubmittingLeague(false)
+    }
   }
 
-  const handleSelectLeagueFromSearch = (league: League) => {
-    if (!league.isPrivate || joinedLeagueIds.includes(league.id)) {
-      joinLeagueAndOpenHome(league)
+  const handleSelectLeagueFromSearch = async (league: League) => {
+    // If user is already a member, open directly
+    if (league.isMember) {
+      setSelectedLeague(league)
+      setRolePreviewOverride(null)
+      setActiveView('league-detail')
       return
     }
+
+    // If public league, join directly in Supabase and open
+    if (!league.isPrivate) {
+      try {
+        const assignedRole = await joinLeagueInSupabase(league.id)
+        const updatedLeague: League = {
+          ...league,
+          isMember: true,
+          myRole: assignedRole,
+        }
+        setAllLeagues((prev) =>
+          prev.map((l) => (l.id === league.id ? updatedLeague : l))
+        )
+        setSelectedLeague(updatedLeague)
+        setRolePreviewOverride(null)
+        setActiveView('league-detail')
+      } catch (err: unknown) {
+        alert(err instanceof Error ? err.message : 'Could not join league')
+      }
+      return
+    }
+
+    // Private league: ask for password on dedicated screen
     setPendingJoinLeague(league)
     setJoinPasswordInput('')
     setJoinPasswordError('')
     setActiveView('join-league-password')
   }
 
-  const handleSubmitJoinPassword = (e?: React.FormEvent) => {
+  const handleSubmitJoinPassword = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     if (!pendingJoinLeague) return
 
-    if (joinPasswordInput === (pendingJoinLeague.password || '')) {
-      joinLeagueAndOpenHome(pendingJoinLeague)
-    } else {
-      setJoinPasswordError('Incorrect password')
+    setJoinPasswordError('')
+    try {
+      const assignedRole = await joinLeagueInSupabase(
+        pendingJoinLeague.id,
+        joinPasswordInput
+      )
+      const updatedLeague: League = {
+        ...pendingJoinLeague,
+        isMember: true,
+        myRole: assignedRole,
+      }
+      setAllLeagues((prev) =>
+        prev.map((l) => (l.id === pendingJoinLeague.id ? updatedLeague : l))
+      )
+      setSelectedLeague(updatedLeague)
+      setRolePreviewOverride(null)
+      setActiveView('league-detail')
+    } catch (err: unknown) {
+      setJoinPasswordError(
+        err instanceof Error ? err.message : 'Incorrect password'
+      )
     }
   }
 
@@ -236,9 +331,7 @@ export function App() {
     setActiveView('league-setting-action')
   }
 
-  const actualUserRole: LeagueRole = selectedLeague
-    ? getUserRoleInLeague(selectedLeague, currentUserId)
-    : 'racer'
+  const actualUserRole: LeagueRole = selectedLeague?.myRole || 'racer'
   const effectiveRole: LeagueRole = rolePreviewOverride || actualUserRole
 
   // Reusable Track Day Pro League Card component
@@ -250,7 +343,7 @@ export function App() {
   ) => {
     const isCyanAccent = idx % 4 === 3
     const accentColorClass = isCyanAccent ? 'text-[#38BDF8]' : 'text-[#FF6B00]'
-    const userRoleInCard = getUserRoleInLeague(league, currentUserId)
+    const userRoleInCard = league.myRole || 'racer'
 
     return (
       <button
@@ -296,7 +389,9 @@ export function App() {
             <span className="block text-[10px] text-[#8A99AD] leading-tight">
               Country
             </span>
-            <span className={`text-xs font-extrabold uppercase truncate block ${accentColorClass}`}>
+            <span
+              className={`text-xs font-extrabold uppercase truncate block ${accentColorClass}`}
+            >
               {league.country}
             </span>
           </div>
@@ -310,9 +405,11 @@ export function App() {
             </span>
             <span className={`text-xs font-extrabold uppercase ${accentColorClass}`}>
               {showAccessBadge
-                ? league.isPrivate
-                  ? 'Locked'
-                  : 'Open'
+                ? league.isMember
+                  ? 'Joined'
+                  : league.isPrivate
+                    ? 'Locked'
+                    : 'Open'
                 : userRoleInCard === 'admin'
                   ? 'Admin'
                   : userRoleInCard === 'team_captain'
@@ -378,7 +475,10 @@ export function App() {
                     </div>
                   ) : (
                     <div className="px-6 text-center flex flex-col items-center">
-                      <HelmetSvg helmet={selectedHelmet} className="w-24 h-24 opacity-85 mb-2" />
+                      <HelmetSvg
+                        helmet={selectedHelmet}
+                        className="w-24 h-24 opacity-85 mb-2"
+                      />
                       <span className="font-display text-2xl font-extrabold text-white tracking-wider">
                         DRIVER AVATAR
                       </span>
@@ -414,6 +514,15 @@ export function App() {
                     {profile.weightKg ? `${profile.weightKg} kg` : '-- kg'}
                   </strong>
                 </span>
+                <span className="text-[#2A323B]">|</span>
+                <button
+                  type="button"
+                  onClick={signOutUser}
+                  title="Sign out"
+                  className="text-[11px] text-[#8A99AD] hover:text-red-400 flex items-center gap-1 font-bold uppercase cursor-pointer"
+                >
+                  <LogOut className="w-3 h-3" />
+                </button>
               </div>
 
               {hasConfiguredProfile && profile.bio && (
@@ -476,7 +585,7 @@ export function App() {
           </div>
         )}
 
-        {/* ================= 2. MY LEAGUES SCREEN (Exact Reference Match) ================= */}
+        {/* ================= 2. MY LEAGUES SCREEN ================= */}
         {activeView === 'leagues' && (
           <div className="flex flex-col flex-1 w-full">
             <TrackDayHeader
@@ -704,11 +813,12 @@ export function App() {
 
               <button
                 type="button"
+                disabled={isSubmittingLeague}
                 onClick={handleConfirmCreateLeague}
-                className="bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-2xl h-36 p-4 flex flex-col items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer"
+                className="bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-2xl h-36 p-4 flex flex-col items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer disabled:opacity-50"
               >
                 <span className="font-display font-extrabold text-2xl tracking-wider text-black uppercase">
-                  CONFIRM
+                  {isSubmittingLeague ? 'SAVING...' : 'CONFIRM'}
                 </span>
                 <span className="text-[10px] text-black/80 font-bold uppercase mt-1">
                   Create & Open
@@ -854,7 +964,10 @@ export function App() {
                 </h2>
 
                 <div className="mt-1 mb-6 flex items-center gap-2 px-3 py-1 rounded-full bg-[#14191E] border border-[#2A323B]">
-                  <CountryFlagCircle country={pendingJoinLeague.country} className="w-4 h-4" />
+                  <CountryFlagCircle
+                    country={pendingJoinLeague.country}
+                    className="w-4 h-4"
+                  />
                   <span className="text-xs font-extrabold text-[#FF6B00] uppercase tracking-wider">
                     {pendingJoinLeague.country}
                   </span>
@@ -983,7 +1096,7 @@ export function App() {
             />
 
             <div className="flex flex-col gap-4 px-5 flex-1 justify-start">
-              {/* 1. ONLY ADMINS BOX — Visible only when user is Admin */}
+              {/* 1. ONLY ADMINS BOX — Visible only when user is Admin/Owner */}
               {effectiveRole === 'admin' && (
                 <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
                   <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
@@ -1185,9 +1298,11 @@ export function App() {
 
             <div className="flex-1 mx-5 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-lg">
               <p className="font-display font-extrabold text-2xl text-white uppercase tracking-wide mb-1">
-                {activeView === 'league-standing' && `${selectedLeague?.name} — Standings`}
+                {activeView === 'league-standing' &&
+                  `${selectedLeague?.name} — Standings`}
                 {activeView === 'league-races' && `${selectedLeague?.name} — Races`}
-                {activeView === 'league-hall-of-fame' && `${selectedLeague?.name} — Hall of Fame`}
+                {activeView === 'league-hall-of-fame' &&
+                  `${selectedLeague?.name} — Hall of Fame`}
                 {activeView === 'league-setting-action' && selectedSettingActionTitle}
                 {activeView === 'history' && 'Race History View'}
                 {activeView === 'notifications' && 'Notifications Center'}
@@ -1224,7 +1339,7 @@ export function App() {
         profile={profile}
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
-        onSave={setProfile}
+        onSave={handleSaveProfile}
       />
     </div>
   )

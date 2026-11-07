@@ -1,15 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
+import { DriverProfile } from '../components/ProfileModal'
 
 export type LeagueRole = 'admin' | 'team_captain' | 'racer'
 
 export interface League {
   id: string
   name: string
+  slug?: string
   country: string
   isPrivate: boolean
-  password?: string
-  createdByUserId: string
-  memberRoles: Record<string, LeagueRole>
+  isMember?: boolean
+  myRole?: LeagueRole
   createdAt: string
 }
 
@@ -24,103 +25,152 @@ const SUPABASE_ANON_KEY =
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-const ALL_LEAGUES_KEY = 'krapp_all_leagues_v2'
-const MY_JOINED_IDS_KEY = 'krapp_joined_league_ids_v2'
-const CURRENT_USER_ID_KEY = 'krapp_current_user_id_v1'
+function mapDbRoleToAppRole(dbRole?: string | null): LeagueRole {
+  if (dbRole === 'owner' || dbRole === 'admin') return 'admin'
+  if (dbRole === 'organiser' || dbRole === 'team_captain') return 'team_captain'
+  return 'racer'
+}
 
-export function getCurrentUserId(): string {
-  try {
-    let id = localStorage.getItem(CURRENT_USER_ID_KEY)
-    if (!id) {
-      id = crypto.randomUUID ? crypto.randomUUID() : `driver-${Date.now()}`
-      localStorage.setItem(CURRENT_USER_ID_KEY, id)
-    }
-    return id
-  } catch {
-    return 'local-driver'
+export async function signInWithGoogle() {
+  const redirectTo = window.location.origin + window.location.pathname
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+    },
+  })
+  if (error) throw error
+  return data
+}
+
+export async function signInWithEmail(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function signUpWithEmail(email: string, password: string, displayName: string) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: displayName,
+      },
+    },
+  })
+  if (error) throw error
+  return data
+}
+
+export async function signOutUser() {
+  await supabase.auth.signOut()
+}
+
+export async function ensureAndLoadDriverProfile(userMeta?: {
+  fullName?: string
+  email?: string
+  avatarUrl?: string
+}): Promise<DriverProfile | null> {
+  const preferredName =
+    userMeta?.fullName ||
+    (userMeta?.email ? userMeta.email.split('@')[0] : 'DRIVER')
+
+  const { data, error } = await supabase.rpc('fn_ensure_current_driver', {
+    p_display_name: preferredName,
+    p_preferred_handle: preferredName,
+  })
+
+  if (error || !data) {
+    console.warn('Could not load driver profile from RPC:', error?.message)
+    return null
+  }
+
+  const cleanUsername = String(data.handle || '@USERNAME')
+    .replace(/^@+/, '')
+    .toUpperCase()
+
+  return {
+    username: cleanUsername,
+    name: String(data.first_name || ''),
+    surname: String(data.surname || ''),
+    weightKg: data.weight_kg != null ? String(data.weight_kg) : '',
+    bio: String(data.bio || ''),
+    avatarType:
+      data.avatar_type === 'custom' || data.avatar_type === 'helmet'
+        ? data.avatar_type
+        : userMeta?.avatarUrl
+          ? 'custom'
+          : 'helmet',
+    helmetId: String(data.helmet_id || 'neon-viper'),
+    customAvatarDataUrl: data.avatar_url || userMeta?.avatarUrl || null,
   }
 }
 
-export function getLocalJoinedIds(): string[] {
-  try {
-    const raw = localStorage.getItem(MY_JOINED_IDS_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
+export async function saveDriverProfileToSupabase(
+  profile: DriverProfile
+): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
 
-export function saveLocalJoinedIds(ids: string[]): void {
-  try {
-    localStorage.setItem(MY_JOINED_IDS_KEY, JSON.stringify(ids))
-  } catch (e) {
-    console.error('Failed to save joined league IDs', e)
-  }
-}
+  const cleanHandleBase = profile.username
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-|-$/g, '')
 
-export function getLocalLeagues(): League[] {
-  try {
-    const raw = localStorage.getItem(ALL_LEAGUES_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as Partial<League>[]
-    return parsed.map((l) => ({
-      id: l.id || 'unknown',
-      name: l.name || 'LEAGUE',
-      country: l.country || 'LATVIA',
-      isPrivate: Boolean(l.isPrivate),
-      password: l.password,
-      createdByUserId: l.createdByUserId || '',
-      memberRoles: l.memberRoles || {},
-      createdAt: l.createdAt || new Date().toISOString(),
-    }))
-  } catch {
-    return []
-  }
-}
+  const validHandle =
+    '@' + (cleanHandleBase.length >= 2 ? cleanHandleBase.slice(0, 38) : 'driver')
 
-export function saveLocalLeagues(leagues: League[]): void {
-  try {
-    localStorage.setItem(ALL_LEAGUES_KEY, JSON.stringify(leagues))
-  } catch (e) {
-    console.error('Failed to save local leagues', e)
-  }
-}
+  const displayName =
+    `${profile.name} ${profile.surname}`.trim() || profile.username.toUpperCase()
 
-export function getUserRoleInLeague(league: League, userId: string): LeagueRole {
-  if (league.createdByUserId === userId) {
-    return 'admin'
+  const { error } = await supabase
+    .from('drivers')
+    .update({
+      handle: validHandle,
+      display_name: displayName,
+      first_name: profile.name.trim(),
+      surname: profile.surname.trim(),
+      weight_kg: profile.weightKg ? parseFloat(profile.weightKg) : null,
+      bio: profile.bio.trim(),
+      avatar_type: profile.avatarType,
+      helmet_id: profile.helmetId,
+      avatar_url: profile.customAvatarDataUrl,
+    })
+    .eq('user_id', user.id)
+
+  if (error) {
+    console.warn('Failed to update driver row in Supabase:', error.message)
   }
-  return league.memberRoles?.[userId] || 'racer'
 }
 
 export async function fetchAllLeagues(): Promise<League[]> {
-  try {
-    const { data, error } = await supabase
-      .from('leagues')
-      .select('*')
-      .order('created_at', { ascending: false })
+  const { data, error } = await supabase.rpc('fn_list_leagues')
 
-    if (!error && data) {
-      const mapped: League[] = data.map((row: Record<string, unknown>) => ({
-        id: String(row.id),
-        name: String(row.name || 'LEAGUE'),
-        country: String(row.country || 'LATVIA'),
-        isPrivate: Boolean(row.is_private),
-        password: row.password ? String(row.password) : undefined,
-        createdByUserId: String(row.created_by_user_id || ''),
-        memberRoles: (row.member_roles as Record<string, LeagueRole>) || {},
-        createdAt: String(row.created_at || new Date().toISOString()),
-      }))
-      saveLocalLeagues(mapped)
-      return mapped
-    }
-    if (error) {
-      console.warn('Supabase fetch warning (falling back to local cache):', error.message)
-    }
-  } catch (err) {
-    console.warn('Supabase connection error:', err)
+  if (error) {
+    console.warn('Error fetching leagues via fn_list_leagues:', error.message)
+    return []
   }
-  return getLocalLeagues()
+
+  if (!Array.isArray(data)) return []
+
+  return data.map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    name: String(row.name || 'LEAGUE'),
+    slug: String(row.slug || ''),
+    country: String(row.country || 'LATVIA'),
+    isPrivate: Boolean(row.is_private),
+    isMember: Boolean(row.is_member),
+    myRole: mapDbRoleToAppRole(row.my_role as string | null),
+    createdAt: String(row.created_at || new Date().toISOString()),
+  }))
 }
 
 export async function createNewLeague(input: {
@@ -128,59 +178,43 @@ export async function createNewLeague(input: {
   country: string
   isPrivate: boolean
   password?: string
-  creatorUserId: string
 }): Promise<League> {
-  const newLeague: League = {
-    id: crypto.randomUUID ? crypto.randomUUID() : `league-${Date.now()}`,
-    name: input.name.trim().toUpperCase(),
-    country: input.country.trim().toUpperCase(),
-    isPrivate: input.isPrivate,
-    password: input.isPrivate ? input.password || '' : undefined,
-    createdByUserId: input.creatorUserId,
-    memberRoles: {
-      [input.creatorUserId]: 'admin',
-    },
-    createdAt: new Date().toISOString(),
+  const { data, error } = await supabase.rpc('fn_create_league', {
+    p_name: input.name.trim().toUpperCase(),
+    p_country: input.country.trim().toUpperCase(),
+    p_is_private: input.isPrivate,
+    p_password: input.isPrivate ? input.password || '' : null,
+  })
+
+  if (error) {
+    throw new Error(error.message)
   }
 
-  const slug =
-    newLeague.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') +
-    '-' +
-    Math.random().toString(36).substring(2, 7)
+  const row = Array.isArray(data) ? data[0] : data
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    slug: String(row.slug || ''),
+    country: String(row.country),
+    isPrivate: Boolean(row.is_private),
+    isMember: true,
+    myRole: 'admin',
+    createdAt: String(row.created_at || new Date().toISOString()),
+  }
+}
 
-  try {
-    const { data, error } = await supabase
-      .from('leagues')
-      .insert([
-        {
-          name: newLeague.name,
-          slug,
-          country: newLeague.country,
-          is_private: newLeague.isPrivate,
-          password: newLeague.password || null,
-          created_by_user_id: newLeague.createdByUserId,
-          member_roles: newLeague.memberRoles,
-        },
-      ])
-      .select()
-      .single()
+export async function joinLeagueInSupabase(
+  leagueId: string,
+  password?: string
+): Promise<LeagueRole> {
+  const { data, error } = await supabase.rpc('fn_join_league', {
+    p_league_id: leagueId,
+    p_password: password || null,
+  })
 
-    if (!error && data) {
-      newLeague.id = String(data.id)
-      newLeague.createdAt = String(data.created_at || newLeague.createdAt)
-    } else if (error) {
-      console.error('Supabase insert error:', error.message)
-    }
-  } catch (err) {
-    console.error('Supabase insert exception:', err)
+  if (error) {
+    throw new Error(error.message)
   }
 
-  const current = getLocalLeagues()
-  const updated = [newLeague, ...current]
-  saveLocalLeagues(updated)
-
-  return newLeague
+  return mapDbRoleToAppRole(String(data))
 }
