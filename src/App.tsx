@@ -59,7 +59,7 @@ const DEFAULT_PROFILE: DriverProfile = {
   weightKg: '',
   bio: '',
   avatarType: 'none',
-  helmetId: 'neon-viper',
+  helmetId: 'track-orange',
   customAvatarDataUrl: null,
 }
 
@@ -680,9 +680,9 @@ export function App() {
                     />
                   ) : profile.avatarType === 'helmet' ? (
                     <div className="flex flex-col items-center justify-center p-4">
-                      <HelmetSvg helmet={selectedHelmet} className="w-32 h-32" />
+                      <HelmetSvg helmet={selectedHelmet} className="w-36 h-36" />
                       {(profile.name || profile.surname) && (
-                        <span className="mt-2 font-display text-lg font-extrabold tracking-wider text-white uppercase">
+                        <span className="mt-1 font-display text-lg font-extrabold tracking-wider text-white uppercase">
                           {profile.name} {profile.surname}{' '}
                           {profile.driverNumber ? `#${profile.driverNumber}` : ''}
                         </span>
@@ -697,7 +697,7 @@ export function App() {
                     <div className="px-6 text-center flex flex-col items-center">
                       <HelmetSvg
                         helmet={selectedHelmet}
-                        className="w-24 h-24 opacity-85 mb-2"
+                        className="w-28 h-28 mb-1"
                       />
                       <span className="font-display text-2xl font-extrabold text-white tracking-wider">
                         DRIVER AVATAR

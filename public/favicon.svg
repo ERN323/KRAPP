@@ -1,8 +1,98 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
-  <rect width="120" height="120" rx="28" fill="#14191E"/>
-  <circle cx="60" cy="60" r="46" stroke="#FF6B00" stroke-width="5"/>
-  <!-- Racing Helmet Silhouette -->
-  <path d="M35 66C35 46 47 34 64 34C79 34 88 45 88 60V72C88 77 83 82 77 82H46C39 82 35 75 35 66Z" fill="#FF6B00"/>
-  <path d="M56 50H87V63H56L48 56.5L56 50Z" fill="#14191E"/>
-  <path d="M40 73H84" stroke="#14191E" stroke-width="4" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" fill="none">
+  <defs>
+    <radialGradient id="domeGrad" cx="58%" cy="28%" r="65%" fx="55%" fy="24%">
+      <stop offset="0%" stop-color="#FF9E44" />
+      <stop offset="28%" stop-color="#FF6B00" />
+      <stop offset="78%" stop-color="#FF6B00" />
+      <stop offset="100%" stop-color="#B83B00" />
+    </radialGradient>
+    <linearGradient id="chinGrad" x1="180" y1="180" x2="255" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF6B00" />
+      <stop offset="55%" stop-color="#FF6B00" />
+      <stop offset="100%" stop-color="#B83B00" />
+    </linearGradient>
+    <linearGradient id="carbonBase" x1="30" y1="70" x2="185" y2="275" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#262930" />
+      <stop offset="40%" stop-color="#111317" />
+      <stop offset="100%" stop-color="#07080A" />
+    </linearGradient>
+    <linearGradient id="silverBand" x1="65" y1="55" x2="88" y2="185" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#64748B" />
+      <stop offset="35%" stop-color="#E2E8F0" />
+      <stop offset="52%" stop-color="#FFFFFF" />
+      <stop offset="75%" stop-color="#94A3B8" />
+      <stop offset="100%" stop-color="#334155" />
+    </linearGradient>
+    <linearGradient id="visorGrad" x1="100" y1="78" x2="265" y2="195" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E232A" />
+      <stop offset="25%" stop-color="#0C0E12" />
+      <stop offset="70%" stop-color="#050608" />
+      <stop offset="100%" stop-color="#14181F" />
+    </linearGradient>
+    <pattern id="carbonPattern" width="8" height="8" patternTransform="rotate(35)" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#0B0D10" />
+      <rect x="0" y="0" width="4" height="4" fill="#1E232B" />
+      <rect x="4" y="4" width="4" height="4" fill="#1E232B" />
+      <rect x="0" y="4" width="4" height="2" fill="#2E3540" opacity="0.6" />
+    </pattern>
+    <clipPath id="helmetClip">
+      <path d="M 48 76 L 26 85 C 25 78, 35 69, 54 63 C 78 35, 118 22, 162 24 C 214 27, 254 62, 265 110 L 254 114 L 264 118 C 265 144, 259 175, 250 198 L 252 204 C 256 226, 245 256, 232 278 C 230 282, 224 284, 217 282 C 150 264, 82 232, 38 196 C 34 192, 33 185, 34 176 C 30 144, 34 108, 48 76 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- App Icon Dark Rounded Slate Background -->
+  <rect width="300" height="300" rx="64" fill="#0B0D10" />
+  <rect x="6" y="6" width="288" height="288" rx="58" stroke="#FF6B00" stroke-opacity="0.35" stroke-width="4" />
+
+  <g transform="translate(8, 4) scale(0.95)">
+    <path d="M 35 190 C 82 228, 150 262, 222 283 C 228 285, 233 282, 234 277 L 228 271 C 155 250, 88 218, 40 182 Z" fill="#08090C" />
+
+    <g clip-path="url(#helmetClip)">
+      <rect x="0" y="0" width="300" height="300" fill="url(#domeGrad)" />
+      <path d="M 165 170 L 265 190 L 260 290 L 185 285 Z" fill="url(#chinGrad)" />
+      <path d="M 192 208 C 206 232, 205 255, 194 276 L 232 284 L 245 215 Z" fill="#B83B00" opacity="0.55" />
+
+      <g opacity="0.42" fill="#FF9E44" transform="rotate(-24 105 115)">
+        <rect x="74" y="62" width="34" height="6" rx="3" />
+        <rect x="68" y="73" width="44" height="6" rx="3" />
+        <rect x="82" y="84" width="36" height="6" rx="3" />
+        <rect x="64" y="95" width="48" height="6" rx="3" />
+        <rect x="76" y="106" width="42" height="6" rx="3" />
+        <rect x="70" y="117" width="46" height="6" rx="3" />
+        <rect x="84" y="128" width="38" height="6" rx="3" />
+        <rect x="72" y="139" width="44" height="6" rx="3" />
+        <rect x="86" y="150" width="34" height="6" rx="3" />
+      </g>
+
+      <path d="M 119 20 C 113 42, 113 64, 116 84 L 122 84 C 119 64, 119 42, 125 20 Z" fill="#0D1014" />
+      <path d="M 15 50 L 92 42 C 76 86, 78 138, 96 178 L 175 212 L 196 285 L 15 285 Z" fill="url(#carbonBase)" />
+      <path d="M 55 128 L 172 212 L 194 282 L 162 276 L 42 188 Z" fill="url(#carbonPattern)" stroke="#272D38" stroke-width="1" />
+      <path d="M 46 178 L 182 268" stroke="#CBD5E1" stroke-width="2.5" stroke-opacity="0.45" stroke-linecap="round" />
+      <path d="M 46 182 L 180 272" stroke="#000000" stroke-width="2" stroke-opacity="0.8" />
+      <path d="M 88 42 C 72 84, 72 132, 86 172 L 74 162 C 62 124, 62 82, 77 42 Z" fill="url(#silverBand)" />
+      <path d="M 76 42 C 60 82, 60 124, 72 161 L 61 151 C 51 116, 51 78, 65 42 Z" fill="#1F242D" />
+
+      <path d="M 74 176 L 106 196 L 118 232 L 66 202 Z" fill="#FF6B00" />
+      <g fill="#0D1014">
+        <rect x="72" y="182" width="18" height="4.5" rx="2.2" transform="rotate(28 72 182)" />
+        <rect x="92" y="193" width="16" height="4.5" rx="2.2" transform="rotate(28 92 193)" />
+        <rect x="68" y="191" width="22" height="4.5" rx="2.2" transform="rotate(28 68 191)" />
+        <rect x="93" y="204" width="18" height="4.5" rx="2.2" transform="rotate(28 93 204)" />
+        <rect x="74" y="203" width="20" height="4.5" rx="2.2" transform="rotate(28 74 203)" />
+      </g>
+
+      <path d="M 152 172 L 156 181 L 205 203 L 208 198" fill="none" stroke="#0D1014" stroke-width="3.2" stroke-linejoin="round" />
+      <path d="M 200 66 L 234 78 L 262 100 L 256 104 L 228 84 L 196 71 Z" fill="#0F1217" stroke="#262B35" stroke-width="1.2" />
+      <path d="M 233 218 L 246 208 C 246 225, 238 248, 224 264 L 219 258 C 226 244, 231 230, 233 218 Z" fill="#0E1116" stroke="#272C35" stroke-width="1.5" stroke-linejoin="round" />
+
+      <ellipse cx="164" cy="70" rx="8" ry="6.5" fill="#FFFFFF" opacity="0.92" />
+      <ellipse cx="164" cy="70" rx="18" ry="13" fill="#FFFFFF" opacity="0.18" />
+    </g>
+
+    <path d="M 54 63 C 37 69, 26 78, 26 85 L 48 77 L 56 92 L 64 64 Z" fill="#14181F" stroke="#2D3340" stroke-width="1.2" stroke-linejoin="round" />
+    <path d="M 98 73 L 132 76 C 184 82, 234 96, 265 113 C 267 142, 260 174, 250 198 L 234 205 L 228 196 L 164 168 C 138 140, 115 109, 98 73 Z" fill="#07080B" stroke="#1E232D" stroke-width="2" stroke-linejoin="round" />
+    <path d="M 103 77 L 134 80 C 184 86, 232 99, 263 115 C 264 142, 258 172, 248 195 L 234 201 L 228 192 L 166 165 C 141 138, 119 109, 103 77 Z" fill="url(#visorGrad)" />
+    <circle cx="152" cy="140" r="5" fill="#CBD5E1" stroke="#0F172A" stroke-width="1.2" />
+    <circle cx="152" cy="140" r="2.2" fill="#334155" />
+  </g>
 </svg>

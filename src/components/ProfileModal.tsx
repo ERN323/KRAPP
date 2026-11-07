@@ -95,7 +95,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <HelmetSvg helmet={selectedHelmet} className="w-20 h-20" />
+                <HelmetSvg helmet={selectedHelmet} className="w-24 h-24" />
               )}
             </div>
 
@@ -121,7 +121,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               <label className="block text-[11px] font-bold uppercase tracking-wider text-[#8A99AD] mb-2 text-center">
                 Or Pick a Racing Helmet Icon
               </label>
-              <div className="grid grid-cols-6 gap-2">
+              <div className="grid grid-cols-7 gap-1.5">
                 {HELMET_OPTIONS.map((helmet) => {
                   const isSelected =
                     formData.avatarType === 'helmet' &&
@@ -138,7 +138,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                         }))
                       }
                       title={helmet.name}
-                      className={`relative p-1.5 rounded-xl border flex flex-col items-center justify-center transition cursor-pointer ${
+                      className={`relative p-1 rounded-xl border flex flex-col items-center justify-center transition cursor-pointer ${
                         isSelected
                           ? 'bg-[#14191E] border-[#FF6B00] ring-2 ring-[#FF6B00]/30'
                           : 'bg-[#14191E]/60 border-[#2A323B] hover:border-[#3E4A56]'
