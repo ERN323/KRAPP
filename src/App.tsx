@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Check,
   Trophy,
@@ -19,6 +19,8 @@ import {
   LogOut,
   BellRing,
   CheckCircle2,
+  Palette,
+  ImagePlus,
 } from 'lucide-react'
 import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
@@ -26,6 +28,7 @@ import { HELMET_OPTIONS, HelmetSvg } from './components/HelmetIcons'
 import { COUNTRIES, CountryFlagCircle } from './components/CountryFlags'
 import { TrackDayHeader, CardGraphicSvg } from './components/TrackDayTheme'
 import { AuthScreen } from './components/AuthScreen'
+import { LogoCropModal } from './components/LogoCropModal'
 import {
   supabase,
   League,
@@ -42,6 +45,7 @@ import {
   assignLeagueMemberRole,
   fetchMyNotifications,
   markAllNotificationsRead,
+  createLeagueTeamInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -59,6 +63,17 @@ const DEFAULT_PROFILE: DriverProfile = {
   customAvatarDataUrl: null,
 }
 
+const PRESET_TEAM_COLORS = [
+  '#FF6B00',
+  '#38BDF8',
+  '#EF4444',
+  '#22C55E',
+  '#EAB308',
+  '#A855F7',
+  '#EC4899',
+  '#FFFFFF',
+]
+
 export type AppView =
   | 'home'
   | 'history'
@@ -72,6 +87,8 @@ export type AppView =
   | 'league-hall-of-fame'
   | 'league-options'
   | 'assign-roles'
+  | 'create-team'
+  | 'create-team-manage-racers'
   | 'league-setting-action'
   | 'notifications'
 
@@ -101,7 +118,7 @@ export function App() {
     null
   )
 
-  // Assign Roles Screen State
+  // Assign Roles & League Members State
   const [leagueMembers, setLeagueMembers] = useState<LeagueMemberItem[]>([])
   const [loadingMembers, setLoadingMembers] = useState(false)
   const [memberSearchQuery, setMemberSearchQuery] = useState('')
@@ -109,6 +126,19 @@ export function App() {
     useState<LeagueMemberItem | null>(null)
   const [assigningRoleLoading, setAssigningRoleLoading] = useState(false)
   const [roleAssignSuccessMsg, setRoleAssignSuccessMsg] = useState('')
+
+  // Create Team Screen State
+  const [teamName, setTeamName] = useState('')
+  const [teamColorHex, setTeamColorHex] = useState('#FF6B00')
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false)
+  const [teamLogoDataUrl, setTeamLogoDataUrl] = useState<string | null>(null)
+  const [rawLogoForCrop, setRawLogoForCrop] = useState<string | null>(null)
+  const [isLogoCropModalOpen, setIsLogoCropModalOpen] = useState(false)
+  const [selectedTeamDriverIds, setSelectedTeamDriverIds] = useState<string[]>([])
+  const [teamRacerSearchQuery, setTeamRacerSearchQuery] = useState('')
+  const [teamCreateError, setTeamCreateError] = useState('')
+  const [isCreatingTeam, setIsCreatingTeam] = useState(false)
+  const teamLogoInputRef = useRef<HTMLInputElement>(null)
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -268,6 +298,20 @@ export function App() {
     return label.includes(q) || handle.includes(q)
   })
 
+  // Filtered league members for "CREATE TEAM -> MANAGE RACERS"
+  const filteredTeamRacers = leagueMembers.filter((member, idx) => {
+    if (!teamRacerSearchQuery.trim()) return true
+    const label = formatMemberLabel(member, idx).toLowerCase()
+    const handle = member.handle.toLowerCase()
+    const q = teamRacerSearchQuery.trim().toLowerCase()
+    return label.includes(q) || handle.includes(q)
+  })
+
+  // Selected members shown in "TEAM SUMMARY" box on Create Team screen
+  const selectedTeamMembers = leagueMembers.filter((m) =>
+    selectedTeamDriverIds.includes(m.driverId)
+  )
+
   const handleOpenCreateLeague = () => {
     setCreateName('')
     setCreateCountry('')
@@ -417,7 +461,6 @@ export function App() {
           updatedMember.displayName || updatedMember.handle
         }`
       )
-      // Also refresh notifications in case Admin changed their own role while testing
       fetchMyNotifications().then((loaded) => setNotifications(loaded))
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Failed to assign role')
@@ -426,9 +469,85 @@ export function App() {
     }
   }
 
+  const handleOpenCreateTeam = async () => {
+    if (!selectedLeague) return
+    setTeamName('')
+    setTeamColorHex('#FF6B00')
+    setIsColorPickerOpen(false)
+    setTeamLogoDataUrl(null)
+    setRawLogoForCrop(null)
+    setSelectedTeamDriverIds([])
+    setTeamRacerSearchQuery('')
+    setTeamCreateError('')
+    setActiveView('create-team')
+    setLoadingMembers(true)
+    const members = await fetchLeagueMembers(selectedLeague.id)
+    setLeagueMembers(members)
+    setLoadingMembers(false)
+  }
+
+  const handleLogoFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setRawLogoForCrop(reader.result)
+        setIsLogoCropModalOpen(true)
+      }
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  const handleToggleTeamRacer = (driverId: string) => {
+    setSelectedTeamDriverIds((prev) =>
+      prev.includes(driverId)
+        ? prev.filter((id) => id !== driverId)
+        : [...prev, driverId]
+    )
+  }
+
+  const handleConfirmCreateTeam = async () => {
+    if (!selectedLeague) return
+    if (!teamName.trim()) {
+      setTeamCreateError('Please enter a team name')
+      return
+    }
+    const cleanHex = teamColorHex.trim().startsWith('#')
+      ? teamColorHex.trim()
+      : `#${teamColorHex.trim()}`
+
+    setIsCreatingTeam(true)
+    setTeamCreateError('')
+    try {
+      await createLeagueTeamInSupabase({
+        leagueId: selectedLeague.id,
+        name: teamName,
+        colorHex: cleanHex,
+        logoUrl: teamLogoDataUrl,
+        driverIds: selectedTeamDriverIds,
+      })
+
+      // Refresh notifications in case the creator added themselves to the team
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+      setActiveView('league-options')
+    } catch (err: unknown) {
+      setTeamCreateError(
+        err instanceof Error ? err.message : 'Failed to create team'
+      )
+    } finally {
+      setIsCreatingTeam(false)
+    }
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
     if (actionTitle === 'ASSIGN ROLES') {
       handleOpenAssignRoles()
+      return
+    }
+    if (actionTitle === 'CREATE TEAM') {
+      handleOpenCreateTeam()
       return
     }
     setSelectedSettingActionTitle(actionTitle)
@@ -460,7 +579,6 @@ export function App() {
         onClick={onClick}
         className="group bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.98] transition-all rounded-2xl p-3.5 flex flex-col justify-between text-left shadow-lg cursor-pointer"
       >
-        {/* Top Row: Circuit/Kart Icon + Trend Arrows */}
         <div className="w-full flex items-start justify-between mb-2">
           <CardGraphicSvg index={idx} className="w-11 h-8" />
           <div className="flex items-center gap-1.5">
@@ -474,12 +592,10 @@ export function App() {
           </div>
         </div>
 
-        {/* League Title */}
         <h3 className="font-display font-extrabold text-xl leading-[1.05] tracking-wide text-white uppercase line-clamp-2 my-1">
           {league.name}
         </h3>
 
-        {/* Middle Two-Column Telemetry Stats */}
         <div className="w-full grid grid-cols-2 gap-2 pt-2 mt-1 border-t border-[#2A323B]">
           <div>
             <span className="block text-[10px] text-[#8A99AD] leading-tight">
@@ -505,7 +621,6 @@ export function App() {
           </div>
         </div>
 
-        {/* Bottom Row: Role / Status Badge + Mini Circuit */}
         <div className="w-full flex items-center justify-between pt-2 mt-2 border-t border-[#2A323B]/60">
           <div>
             <span className="block text-[10px] text-[#8A99AD] leading-tight">
@@ -550,7 +665,6 @@ export function App() {
               unreadNotificationsCount={unreadNotificationsCount}
             />
 
-            {/* CENTRAL AVATAR MODULE (Tappable to edit profile) */}
             <section className="my-auto px-5 py-4 flex flex-col items-center justify-center">
               <button
                 type="button"
@@ -594,7 +708,6 @@ export function App() {
                     </div>
                   )}
 
-                  {/* Hover/tap edit badge */}
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <span className="text-xs font-extrabold uppercase tracking-wider bg-[#FF6B00] text-black px-4 py-1.5 rounded-full shadow-lg">
                       Edit Driver Profile
@@ -603,7 +716,6 @@ export function App() {
                 </div>
               </button>
 
-              {/* Driver Telemetry Bar under Avatar */}
               <div className="mt-4 flex items-center gap-3 bg-[#1C2228] border border-[#2A323B] rounded-full px-4 py-1.5">
                 <span className="text-[11px] text-[#8A99AD] font-semibold uppercase">
                   Driver:{' '}
@@ -639,7 +751,6 @@ export function App() {
               )}
             </section>
 
-            {/* BOTTOM TWO TELEMETRY CARDS: RACE HISTORY & MY LEAGUES */}
             <nav className="grid grid-cols-2 gap-3.5 px-5 w-full">
               <button
                 type="button"
@@ -702,7 +813,6 @@ export function App() {
               unreadNotificationsCount={unreadNotificationsCount}
             />
 
-            {/* ACTION PILL BUTTONS: Orange CREATE LEAGUE + & Outlined JOIN LEAGUE */}
             <div className="flex flex-col items-center gap-3 px-8 mb-6">
               <button
                 type="button"
@@ -731,7 +841,6 @@ export function App() {
               </button>
             </div>
 
-            {/* 2x2 GRID OF JOINED LEAGUES */}
             {myLeagues.length > 0 ? (
               <section className="grid grid-cols-2 gap-3.5 px-5 content-start flex-1">
                 {myLeagues.map((league, idx) =>
@@ -769,7 +878,6 @@ export function App() {
               />
 
               <div className="px-5 flex flex-col gap-4 mt-2">
-                {/* League Name Card Input */}
                 <div className="bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-2xl p-3.5 transition">
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A99AD] mb-1">
                     League Name
@@ -786,7 +894,6 @@ export function App() {
                   />
                 </div>
 
-                {/* Country Dropdown (All 195+ countries) */}
                 <div className="relative">
                   <button
                     type="button"
@@ -850,7 +957,6 @@ export function App() {
                   )}
                 </div>
 
-                {/* Private League Toggle */}
                 <button
                   type="button"
                   onClick={() => {
@@ -878,7 +984,6 @@ export function App() {
                   </span>
                 </button>
 
-                {/* Conditional Password Input when Private League is checked */}
                 {createIsPrivate && (
                   <div className="bg-[#1C2228] border border-[#FF6B00]/60 rounded-2xl p-3.5 transition">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-[#FF6B00] mb-1">
@@ -905,7 +1010,6 @@ export function App() {
               </div>
             </div>
 
-            {/* Bottom Two Action Cards: CANCEL & CONFIRM */}
             <div className="grid grid-cols-2 gap-3.5 px-5 w-full mt-auto pt-6">
               <button
                 type="button"
@@ -947,9 +1051,7 @@ export function App() {
               unreadNotificationsCount={unreadNotificationsCount}
             />
 
-            {/* Search Controls: SEARCH LEAGUE & SEARCH COUNTRY */}
             <div className="flex flex-col items-center gap-3 px-8 mb-6">
-              {/* SEARCH LEAGUE Input Pill */}
               <div className="w-full bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-5 flex items-center gap-2 shadow-md">
                 <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
                 <input
@@ -961,7 +1063,6 @@ export function App() {
                 />
               </div>
 
-              {/* SEARCH COUNTRY Dropdown Pill */}
               <div className="relative w-full">
                 <button
                   type="button"
@@ -1028,7 +1129,6 @@ export function App() {
               </div>
             </div>
 
-            {/* 2x2 Grid of Search Results */}
             {filteredSearchLeagues.length > 0 ? (
               <section className="grid grid-cols-2 gap-3.5 px-5 content-start flex-1">
                 {filteredSearchLeagues.map((league, idx) =>
@@ -1128,7 +1228,6 @@ export function App() {
               onMoreClick={() => setActiveView('league-options')}
             />
 
-            {/* 3 STACKED TELEMETRY CARDS: STANDING, RACES, HISTORY (HALL OF FAME) */}
             <div className="flex flex-col gap-4 px-5 flex-1 justify-between">
               <button
                 type="button"
@@ -1220,7 +1319,6 @@ export function App() {
                     </span>
                   </div>
 
-                  {/* Primary Highlighted Button: UPLOAD RACE RESULTS */}
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('UPLOAD RACE RESULTS')}
@@ -1303,8 +1401,8 @@ export function App() {
 
                   <button
                     type="button"
-                    onClick={() => handleOpenSettingAction('CREATE TEAM')}
-                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
+                    onClick={handleOpenCreateTeam}
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-[#38BDF8]/60 active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <ShieldPlus className="w-4 h-4 text-[#38BDF8]" />
                     <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
@@ -1366,7 +1464,7 @@ export function App() {
           </div>
         )}
 
-        {/* ================= 8. ASSIGN ROLES SCREEN (Matches Both States in Mockup) ================= */}
+        {/* ================= 8. ASSIGN ROLES SCREEN ================= */}
         {activeView === 'assign-roles' && selectedLeague && (
           <div className="flex flex-col flex-1 w-full">
             <TrackDayHeader
@@ -1384,13 +1482,11 @@ export function App() {
               unreadNotificationsCount={unreadNotificationsCount}
             />
 
-            {/* Outer Container: ASSIGN ROLES */}
             <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col">
               <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center mb-3">
                 ASSIGN ROLES
               </h2>
 
-              {/* Search Pill: SEARCH NAME - NUMBER */}
               <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-4 shadow-inner">
                 <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
                 <input
@@ -1408,16 +1504,13 @@ export function App() {
                 />
               </div>
 
-              {/* Inner Box: Either Member List (Left Mockup) OR Selected Member + 5 Role Pills (Right Mockup) */}
               <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col">
                 {loadingMembers ? (
                   <div className="flex-1 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
                     Loading league members...
                   </div>
                 ) : selectedMemberForRole ? (
-                  /* STATE 2 (Right Mockup): Selected Member Pill + 5 Role Options Box */
                   <div className="flex flex-col flex-1">
-                    {/* Selected Member Pill (Click to go back to full member list) */}
                     <button
                       type="button"
                       onClick={() => {
@@ -1439,7 +1532,6 @@ export function App() {
                       </span>
                     </button>
 
-                    {/* Nested Role Options Container matching Right Mockup */}
                     <div className="bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col gap-3">
                       {ALL_LEAGUE_ROLES.map((roleOption) => {
                         const isCurrentRole =
@@ -1475,7 +1567,6 @@ export function App() {
                     )}
                   </div>
                 ) : filteredLeagueMembers.length > 0 ? (
-                  /* STATE 1 (Left Mockup): List of Members in the League */
                   <div className="flex flex-col gap-3 overflow-y-auto">
                     {filteredLeagueMembers.map((member, idx) => (
                       <button
@@ -1511,12 +1602,333 @@ export function App() {
           </div>
         )}
 
-        {/* ================= 9. NOTIFICATIONS SCREEN (Bell on Homescreen) ================= */}
+        {/* ================= 9. CREATE TEAM SCREEN (Matches Skeleton Mockup) ================= */}
+        {activeView === 'create-team' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="SETTINGS"
+              onBack={() => setActiveView('league-options')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            {/* Outer Container: CREATE TEAM */}
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-between">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-center gap-2.5 mb-1">
+                  {teamLogoDataUrl && (
+                    <img
+                      src={teamLogoDataUrl}
+                      alt="Team Logo"
+                      className="w-8 h-8 rounded-full border-2 object-cover"
+                      style={{ borderColor: teamColorHex }}
+                    />
+                  )}
+                  <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center">
+                    CREATE TEAM
+                  </h2>
+                </div>
+
+                {/* 1. NAME Pill Input */}
+                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-5 flex items-center justify-center shadow-inner">
+                  <input
+                    type="text"
+                    value={teamName}
+                    onChange={(e) => {
+                      setTeamName(e.target.value)
+                      setTeamCreateError('')
+                    }}
+                    placeholder="NAME"
+                    className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none"
+                  />
+                </div>
+
+                {/* 2. COLOR Pill (Supports HEX Code input + Native Color Picker + Presets) */}
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsColorPickerOpen((prev) => !prev)}
+                    className="w-full bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] rounded-full h-11 px-5 flex items-center justify-center gap-2.5 shadow-inner cursor-pointer"
+                  >
+                    <span
+                      className="w-4 h-4 rounded-full border border-white/60 shrink-0"
+                      style={{ backgroundColor: teamColorHex }}
+                    />
+                    <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                      COLOR ({teamColorHex.toUpperCase()})
+                    </span>
+                    <Palette className="w-4 h-4 text-[#8A99AD]" />
+                  </button>
+
+                  {isColorPickerOpen && (
+                    <div className="bg-[#14191E] border border-[#FF6B00]/60 rounded-2xl p-3 flex flex-col gap-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A99AD]">
+                          HEX Code:
+                        </span>
+                        <input
+                          type="text"
+                          value={teamColorHex}
+                          onChange={(e) => setTeamColorHex(e.target.value)}
+                          placeholder="#FF6B00"
+                          maxLength={7}
+                          className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-lg px-3 py-1 text-xs font-mono font-bold text-white uppercase focus:outline-none focus:border-[#FF6B00]"
+                        />
+                        <input
+                          type="color"
+                          value={
+                            /^#[0-9A-Fa-f]{6}$/.test(teamColorHex)
+                              ? teamColorHex
+                              : '#FF6B00'
+                          }
+                          onChange={(e) => setTeamColorHex(e.target.value)}
+                          className="w-8 h-7 rounded cursor-pointer bg-transparent border-0"
+                          title="Pick custom color"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1.5 pt-1">
+                        {PRESET_TEAM_COLORS.map((hex) => (
+                          <button
+                            key={hex}
+                            type="button"
+                            onClick={() => setTeamColorHex(hex)}
+                            className={`w-6 h-6 rounded-full border-2 transition cursor-pointer ${
+                              teamColorHex.toUpperCase() === hex
+                                ? 'border-white scale-110'
+                                : 'border-transparent opacity-80 hover:opacity-100'
+                            }`}
+                            style={{ backgroundColor: hex }}
+                            title={hex}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. ADD LOGO Pill (Upload only -> Opens circular cropper modal) */}
+                <input
+                  ref={teamLogoInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleLogoFileSelected}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => teamLogoInputRef.current?.click()}
+                  className="w-full bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] rounded-full h-11 px-5 flex items-center justify-center gap-2.5 shadow-inner cursor-pointer"
+                >
+                  {teamLogoDataUrl ? (
+                    <>
+                      <img
+                        src={teamLogoDataUrl}
+                        alt="Team Logo"
+                        className="w-6 h-6 rounded-full object-cover border border-[#FF6B00]"
+                      />
+                      <span className="font-display font-extrabold text-base tracking-wider text-[#38BDF8] uppercase">
+                        CHANGE / ADJUST LOGO
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="w-4 h-4 text-[#FF6B00]" />
+                      <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                        ADD LOGO
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                {/* 4. MANAGE RACERS Pill (Opens league member selector) */}
+                <button
+                  type="button"
+                  onClick={() => setActiveView('create-team-manage-racers')}
+                  className="w-full bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] hover:border-[#FF6B00]/60 rounded-full h-11 px-5 flex items-center justify-center gap-2 shadow-inner cursor-pointer"
+                >
+                  <Users className="w-4 h-4 text-[#FF6B00]" />
+                  <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                    MANAGE RACERS ({selectedTeamDriverIds.length})
+                  </span>
+                </button>
+
+                {/* 5. TEAM SUMMARY Box */}
+                <div className="bg-[#14191E]/80 border-2 border-[#2A323B] rounded-3xl p-3.5 min-h-[150px] flex flex-col">
+                  <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase text-center mb-2.5">
+                    TEAM SUMMARY
+                  </span>
+
+                  {selectedTeamMembers.length > 0 ? (
+                    <div className="flex flex-col gap-2.5 max-h-44 overflow-y-auto">
+                      {selectedTeamMembers.map((member) => {
+                        const originalIdx = leagueMembers.findIndex(
+                          (m) => m.driverId === member.driverId
+                        )
+                        return (
+                          <div
+                            key={member.driverId}
+                            className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-10 px-4 flex items-center justify-between"
+                          >
+                            <span
+                              className="font-display font-extrabold text-sm sm:text-base tracking-wider uppercase truncate"
+                              style={{ color: teamColorHex || '#FF6B00' }}
+                            >
+                              {formatMemberLabel(
+                                member,
+                                originalIdx >= 0 ? originalIdx : 0
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleToggleTeamRacer(member.driverId)
+                              }
+                              className="text-[10px] font-bold uppercase text-[#8A99AD] hover:text-red-400 ml-2 cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-center px-4">
+                      <p className="text-xs text-[#8A99AD]">
+                        Tap <strong className="text-[#FF6B00]">MANAGE RACERS</strong> above to select league members for this team.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {teamCreateError && (
+                  <p className="text-xs font-bold text-red-400 text-center">
+                    {teamCreateError}
+                  </p>
+                )}
+              </div>
+
+              {/* 6. Bottom Two Cards: CANCEL & CONFIRM */}
+              <div className="grid grid-cols-2 gap-3.5 w-full mt-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveView('league-options')}
+                  className="bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] active:scale-[0.98] transition-all rounded-3xl h-36 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
+                >
+                  <span className="font-display font-extrabold text-2xl tracking-wider text-[#EF4444] uppercase">
+                    CANCEL
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isCreatingTeam}
+                  onClick={handleConfirmCreateTeam}
+                  className="bg-[#14191E] hover:bg-[#192026] border border-[#FF6B00]/60 active:scale-[0.98] transition-all rounded-3xl h-36 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer disabled:opacity-50"
+                >
+                  <span className="font-display font-extrabold text-2xl tracking-wider text-[#FF6B00] uppercase">
+                    {isCreatingTeam ? 'SAVING...' : 'CONFIRM'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 10. CREATE TEAM -> MANAGE RACERS PICKER SCREEN ================= */}
+        {activeView === 'create-team-manage-racers' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="CREATE TEAM · MANAGE RACERS"
+              onBack={() => setActiveView('create-team')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-between">
+              <div className="flex flex-col flex-1">
+                <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center mb-3">
+                  SELECT TEAM RACERS
+                </h2>
+
+                {/* Search Input */}
+                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-4 shadow-inner">
+                  <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                  <input
+                    type="text"
+                    value={teamRacerSearchQuery}
+                    onChange={(e) => setTeamRacerSearchQuery(e.target.value)}
+                    placeholder="SEARCH NAME - NUMBER"
+                    className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                  />
+                </div>
+
+                {/* Member Multi-Select List */}
+                <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-3 overflow-y-auto max-h-[380px]">
+                  {loadingMembers ? (
+                    <div className="flex-1 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
+                      Loading league members...
+                    </div>
+                  ) : filteredTeamRacers.length > 0 ? (
+                    filteredTeamRacers.map((member, idx) => {
+                      const isSelected = selectedTeamDriverIds.includes(
+                        member.driverId
+                      )
+                      return (
+                        <button
+                          key={member.driverId}
+                          type="button"
+                          onClick={() => handleToggleTeamRacer(member.driverId)}
+                          className={`w-full rounded-full h-11 px-5 flex items-center justify-between transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-[#FF6B00] text-black border-2 border-white shadow-md'
+                              : 'bg-[#1C2228] hover:bg-[#242C35] text-[#FF6B00] border border-[#2A323B]'
+                          }`}
+                        >
+                          <span className="font-display font-extrabold text-base tracking-wider uppercase truncate">
+                            {formatMemberLabel(member, idx)}
+                          </span>
+                          <span
+                            className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ml-2 ${
+                              isSelected
+                                ? 'bg-black border-black text-[#FF6B00]'
+                                : 'border-[#8A99AD]'
+                            }`}
+                          >
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 stroke-[3.5]" />
+                            )}
+                          </span>
+                        </button>
+                      )
+                    })
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-xs text-[#8A99AD] text-center">
+                      No league members found.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('create-team')}
+                className="w-full mt-4 bg-[#FF6B00] hover:bg-[#ff7b1a] text-black font-display font-extrabold text-base tracking-wider uppercase h-12 rounded-full shadow-lg shadow-[#FF6B00]/20 transition cursor-pointer"
+              >
+                DONE ({selectedTeamDriverIds.length} SELECTED)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 11. NOTIFICATIONS SCREEN (Bell on Homescreen) ================= */}
         {activeView === 'notifications' && (
           <div className="flex flex-col flex-1 w-full">
             <TrackDayHeader
               sectionTitle="NOTIFICATIONS"
-              sectionSubtitle="ROLE & LEAGUE UPDATES"
+              sectionSubtitle="ROLE & TEAM UPDATES"
               onBack={() => setActiveView('home')}
               onBellClick={handleOpenNotifications}
               unreadNotificationsCount={0}
@@ -1554,7 +1966,7 @@ export function App() {
                     NO NOTIFICATIONS YET
                   </p>
                   <p className="text-xs text-[#8A99AD] max-w-xs">
-                    When an Admin updates your role in a league, you will see the alert right here.
+                    When an Admin or Team Captain updates your role or adds you to a team, you will see the alert right here.
                   </p>
                 </div>
               )}
@@ -1642,6 +2054,17 @@ export function App() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         onSave={handleSaveProfile}
+      />
+
+      {/* Team Logo Circular Crop & Adjust Modal */}
+      <LogoCropModal
+        imageSrc={rawLogoForCrop}
+        isOpen={isLogoCropModalOpen}
+        onClose={() => setIsLogoCropModalOpen(false)}
+        onConfirm={(croppedUrl) => {
+          setTeamLogoDataUrl(croppedUrl)
+          setIsLogoCropModalOpen(false)
+        }}
       />
     </div>
   )

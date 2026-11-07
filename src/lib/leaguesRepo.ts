@@ -330,3 +330,25 @@ export async function fetchMyNotifications(): Promise<AppNotification[]> {
 export async function markAllNotificationsRead(): Promise<void> {
   await supabase.rpc('fn_mark_notifications_read')
 }
+
+export async function createLeagueTeamInSupabase(input: {
+  leagueId: string
+  name: string
+  colorHex: string
+  logoUrl: string | null
+  driverIds: string[]
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('fn_create_team', {
+    p_league_id: input.leagueId,
+    p_name: input.name.trim().toUpperCase(),
+    p_color_hex: input.colorHex.trim() || '#FF6B00',
+    p_logo_url: input.logoUrl,
+    p_driver_ids: input.driverIds,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return String(data)
+}
