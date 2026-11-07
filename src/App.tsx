@@ -1,8 +1,26 @@
 import { useState, useEffect } from 'react'
-import { Bell, ArrowLeft, MoreHorizontal, Check } from 'lucide-react'
+import {
+  Check,
+  Trophy,
+  Flag,
+  Medal,
+  Lock,
+  Globe,
+  Upload,
+  UserCog,
+  Users,
+  CalendarPlus,
+  Trash2,
+  UserPlus,
+  ShieldPlus,
+  Send,
+  ChevronDown,
+  Search,
+} from 'lucide-react'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
 import { HELMET_OPTIONS, HelmetSvg } from './components/HelmetIcons'
 import { COUNTRIES, CountryFlagCircle } from './components/CountryFlags'
+import { TrackDayHeader, CardGraphicSvg } from './components/TrackDayTheme'
 import {
   League,
   LeagueRole,
@@ -65,7 +83,7 @@ export function App() {
   const [selectedLeague, setSelectedLeague] = useState<League | null>(null)
   const [selectedSettingActionTitle, setSelectedSettingActionTitle] = useState('')
 
-  // Optional role preview override on the Settings page so user can test Admin / Team Captain / Racer views easily
+  // Role preview override on the Settings page so user can test Admin / Team Captain / Racer views easily
   const [rolePreviewOverride, setRolePreviewOverride] = useState<LeagueRole | null>(
     null
   )
@@ -109,7 +127,7 @@ export function App() {
     profile.avatarType !== 'none' ||
     Boolean(profile.name || profile.surname || profile.weightKg || profile.bio)
 
-  // Only show leagues the user has created or joined in "My LEAGUES"
+  // Only show leagues the user has created or joined in "MY LEAGUES"
   const myLeagues = allLeagues.filter((l) => joinedLeagueIds.includes(l.id))
 
   // Filtered leagues in "JOIN LEAGUE" search screen
@@ -173,7 +191,6 @@ export function App() {
       return
     }
 
-    // The league creator automatically becomes the admin
     const created = await createNewLeague({
       name: createName,
       country: createCountry,
@@ -224,139 +241,258 @@ export function App() {
     : 'racer'
   const effectiveRole: LeagueRole = rolePreviewOverride || actualUserRole
 
+  // Reusable Track Day Pro League Card component
+  const renderLeagueCard = (
+    league: League,
+    idx: number,
+    onClick: () => void,
+    showAccessBadge = false
+  ) => {
+    const isCyanAccent = idx % 4 === 3
+    const accentColorClass = isCyanAccent ? 'text-[#38BDF8]' : 'text-[#FF6B00]'
+    const userRoleInCard = getUserRoleInLeague(league, currentUserId)
+
+    return (
+      <button
+        key={league.id}
+        type="button"
+        onClick={onClick}
+        className="group bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.98] transition-all rounded-2xl p-3.5 flex flex-col justify-between text-left shadow-lg cursor-pointer"
+      >
+        {/* Top Row: Circuit/Kart Icon + Trend Arrows */}
+        <div className="w-full flex items-start justify-between mb-2">
+          <CardGraphicSvg index={idx} className="w-11 h-8" />
+          <div className="flex items-center gap-1.5">
+            {showAccessBadge && (
+              <CountryFlagCircle country={league.country} className="w-5 h-5" />
+            )}
+            <span className="text-xs font-extrabold tracking-tighter">
+              <span className="text-[#8A99AD]">↑</span>
+              <span className={accentColorClass}>↓</span>
+            </span>
+          </div>
+        </div>
+
+        {/* League Title */}
+        <h3 className="font-display font-extrabold text-xl leading-[1.05] tracking-wide text-white uppercase line-clamp-2 my-1">
+          {league.name}
+        </h3>
+
+        {/* Middle Two-Column Telemetry Stats */}
+        <div className="w-full grid grid-cols-2 gap-2 pt-2 mt-1 border-t border-[#2A323B]">
+          <div>
+            <span className="block text-[10px] text-[#8A99AD] leading-tight">
+              {showAccessBadge ? 'Access' : 'Statistics'}
+            </span>
+            <span className="text-xs font-bold text-white">
+              {showAccessBadge
+                ? league.isPrivate
+                  ? 'Private'
+                  : 'Public'
+                : '0 races'}
+            </span>
+          </div>
+          <div className="border-l border-[#2A323B] pl-2">
+            <span className="block text-[10px] text-[#8A99AD] leading-tight">
+              Country
+            </span>
+            <span className={`text-xs font-extrabold uppercase truncate block ${accentColorClass}`}>
+              {league.country}
+            </span>
+          </div>
+        </div>
+
+        {/* Bottom Row: Role / Status Badge + Mini Circuit */}
+        <div className="w-full flex items-center justify-between pt-2 mt-2 border-t border-[#2A323B]/60">
+          <div>
+            <span className="block text-[10px] text-[#8A99AD] leading-tight">
+              {showAccessBadge ? 'Status:' : 'Role:'}
+            </span>
+            <span className={`text-xs font-extrabold uppercase ${accentColorClass}`}>
+              {showAccessBadge
+                ? league.isPrivate
+                  ? 'Locked'
+                  : 'Open'
+                : userRoleInCard === 'admin'
+                  ? 'Admin'
+                  : userRoleInCard === 'team_captain'
+                    ? 'Captain'
+                    : 'Racer'}
+            </span>
+          </div>
+          {showAccessBadge ? (
+            league.isPrivate ? (
+              <Lock className="w-4 h-4 text-[#FF6B00]" />
+            ) : (
+              <Globe className="w-4 h-4 text-[#38BDF8]" />
+            )
+          ) : (
+            <CountryFlagCircle country={league.country} className="w-5 h-5" />
+          )}
+        </div>
+      </button>
+    )
+  }
+
   return (
-    <div className="min-h-screen w-full bg-[#3a3a3a] text-white flex justify-center">
-      {/* Mobile-first container matching the KRAPP wireframes */}
-      <main className="w-full max-w-md min-h-screen flex flex-col justify-between px-5 py-6 select-none">
-        {/* ================= HOMESCREEN ================= */}
+    <div className="min-h-screen w-full bg-[#0d1114] text-white flex justify-center">
+      {/* Mobile-first Track Day Pro frame */}
+      <main className="w-full max-w-md min-h-screen bg-[#14191E] border-x border-[#222A32] flex flex-col justify-between pb-6 select-none shadow-2xl">
+        {/* ================= 1. HOMESCREEN ================= */}
         {activeView === 'home' && (
-          <>
-            {/* 1. TOP PILL BAR: @USERNAME + NOTIFICATION BELL */}
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg">
+          <div className="flex flex-col flex-1 justify-between">
+            <TrackDayHeader
+              sectionTitle={`@${profile.username}`}
+              sectionSubtitle="DRIVER DASHBOARD"
+              onMenuClick={() => setIsProfileModalOpen(true)}
+              onBellClick={() => setActiveView('notifications')}
+            />
+
+            {/* CENTRAL AVATAR MODULE (Tappable to edit profile) */}
+            <section className="my-auto px-5 py-4 flex flex-col items-center justify-center">
               <button
                 type="button"
                 onClick={() => setIsProfileModalOpen(true)}
-                className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide truncate max-w-[68%] hover:opacity-90 transition cursor-pointer"
-                title="Tap to edit @username"
+                className="group relative w-60 h-60 sm:w-64 sm:h-64 rounded-full p-1.5 bg-gradient-to-b from-[#FF6B00] via-[#2A323B] to-[#38BDF8] active:scale-[0.98] transition-all shadow-2xl shadow-black/80 cursor-pointer"
               >
-                @{profile.username}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveView('notifications')}
-                aria-label="Notifications"
-                className="absolute right-4 w-12 h-12 rounded-full bg-[#3a3a3a] flex items-center justify-center hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <Bell className="w-6 h-6 text-[#32cd32]" strokeWidth={2} />
-              </button>
-            </header>
-
-            {/* 2. CENTRAL AVATAR CIRCLE (Tappable to edit profile) */}
-            <section className="my-auto py-6 flex flex-col items-center justify-center">
-              <button
-                type="button"
-                onClick={() => setIsProfileModalOpen(true)}
-                className="group relative w-64 h-64 sm:w-72 sm:h-72 rounded-full border-[5px] border-black bg-[#3a3a3a] hover:bg-[#404040] active:scale-[0.98] transition-all flex flex-col items-center justify-center overflow-hidden shadow-xl cursor-pointer"
-              >
-                {profile.avatarType === 'custom' && profile.customAvatarDataUrl ? (
-                  <img
-                    src={profile.customAvatarDataUrl}
-                    alt={profile.username}
-                    className="w-full h-full object-cover"
-                  />
-                ) : profile.avatarType === 'helmet' ? (
-                  <div className="flex flex-col items-center justify-center p-4">
-                    <HelmetSvg helmet={selectedHelmet} className="w-36 h-36" />
-                    {(profile.name || profile.surname) && (
-                      <span className="mt-2 text-sm font-extrabold tracking-wider text-white uppercase">
-                        {profile.name} {profile.surname}
+                <div className="w-full h-full rounded-full bg-[#1C2228] flex flex-col items-center justify-center overflow-hidden relative">
+                  {profile.avatarType === 'custom' && profile.customAvatarDataUrl ? (
+                    <img
+                      src={profile.customAvatarDataUrl}
+                      alt={profile.username}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : profile.avatarType === 'helmet' ? (
+                    <div className="flex flex-col items-center justify-center p-4">
+                      <HelmetSvg helmet={selectedHelmet} className="w-32 h-32" />
+                      {(profile.name || profile.surname) && (
+                        <span className="mt-2 font-display text-lg font-extrabold tracking-wider text-white uppercase">
+                          {profile.name} {profile.surname}
+                        </span>
+                      )}
+                      {profile.weightKg && (
+                        <span className="text-xs font-extrabold text-[#FF6B00] uppercase">
+                          {profile.weightKg} KG
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="px-6 text-center flex flex-col items-center">
+                      <HelmetSvg helmet={selectedHelmet} className="w-24 h-24 opacity-85 mb-2" />
+                      <span className="font-display text-2xl font-extrabold text-white tracking-wider">
+                        DRIVER AVATAR
                       </span>
-                    )}
-                    {profile.weightKg && (
-                      <span className="text-xs font-bold text-[#32cd32]">
-                        {profile.weightKg} kg
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="px-6 text-center flex flex-col items-center">
-                    <span className="text-3xl sm:text-4xl font-extrabold text-black tracking-wide mb-2">
-                      AVATAR
-                    </span>
-                    <p className="text-xs sm:text-sm font-bold text-black/90 leading-snug max-w-[180px]">
-                      When pressed, user can edit his profile
-                    </p>
-                  </div>
-                )}
+                      <p className="text-[11px] font-semibold text-[#8A99AD] leading-snug max-w-[170px] mt-1">
+                        Tap to edit profile, weight & helmet
+                      </p>
+                    </div>
+                  )}
 
-                {hasConfiguredProfile && (
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="text-xs font-extrabold uppercase tracking-wider bg-[#222222] text-[#32cd32] px-3 py-1.5 rounded-full border border-[#32cd32]/40">
-                      Edit Profile
+                  {/* Hover/tap edit badge */}
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="text-xs font-extrabold uppercase tracking-wider bg-[#FF6B00] text-black px-4 py-1.5 rounded-full shadow-lg">
+                      Edit Driver Profile
                     </span>
                   </div>
-                )}
+                </div>
               </button>
+
+              {/* Driver Telemetry Bar under Avatar */}
+              <div className="mt-4 flex items-center gap-3 bg-[#1C2228] border border-[#2A323B] rounded-full px-4 py-1.5">
+                <span className="text-[11px] text-[#8A99AD] font-semibold uppercase">
+                  Driver:{' '}
+                  <strong className="text-white">
+                    {profile.name || profile.surname
+                      ? `${profile.name} ${profile.surname}`.trim()
+                      : `@${profile.username}`}
+                  </strong>
+                </span>
+                <span className="text-[#2A323B]">|</span>
+                <span className="text-[11px] text-[#8A99AD] font-semibold uppercase">
+                  Weight:{' '}
+                  <strong className="text-[#FF6B00]">
+                    {profile.weightKg ? `${profile.weightKg} kg` : '-- kg'}
+                  </strong>
+                </span>
+              </div>
 
               {hasConfiguredProfile && profile.bio && (
-                <p className="mt-3 text-xs text-neutral-300 text-center max-w-xs italic line-clamp-2">
+                <p className="mt-2 text-xs text-[#8A99AD] text-center max-w-xs italic line-clamp-2">
                   "{profile.bio}"
                 </p>
               )}
             </section>
 
-            {/* 3. BOTTOM TWO CARDS: RACE HISTORY & MY LEAGUES */}
-            <nav className="grid grid-cols-2 gap-4 w-full">
+            {/* BOTTOM TWO TELEMETRY CARDS: RACE HISTORY & MY LEAGUES */}
+            <nav className="grid grid-cols-2 gap-3.5 px-5 w-full">
               <button
                 type="button"
                 onClick={() => setActiveView('history')}
-                className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] h-64 sm:h-72 p-4 flex items-center justify-center shadow-lg cursor-pointer"
+                className="bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#38BDF8]/60 active:scale-[0.98] transition-all rounded-2xl h-48 p-4 flex flex-col justify-between text-left shadow-lg cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
-                  RACE HISTORY
-                </span>
+                <div className="w-full flex items-center justify-between">
+                  <CardGraphicSvg index={1} className="w-10 h-8" />
+                  <span className="text-xs font-extrabold text-[#38BDF8]">↑↓</span>
+                </div>
+                <div>
+                  <span className="font-display font-extrabold text-2xl tracking-wide text-white uppercase block leading-none">
+                    RACE
+                  </span>
+                  <span className="font-display font-extrabold text-2xl tracking-wide text-[#38BDF8] uppercase block leading-tight">
+                    HISTORY
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-[#2A323B] flex items-center justify-between text-[11px]">
+                  <span className="text-[#8A99AD]">Telemetry</span>
+                  <span className="font-bold text-white">Logs & CSV</span>
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveView('leagues')}
-                className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] h-64 sm:h-72 p-4 flex items-center justify-center shadow-lg cursor-pointer"
+                className="bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.98] transition-all rounded-2xl h-48 p-4 flex flex-col justify-between text-left shadow-lg cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
-                  MY LEAGUES
-                </span>
+                <div className="w-full flex items-center justify-between">
+                  <CardGraphicSvg index={0} className="w-10 h-8" />
+                  <span className="text-xs font-extrabold text-[#FF6B00]">↑↓</span>
+                </div>
+                <div>
+                  <span className="font-display font-extrabold text-2xl tracking-wide text-white uppercase block leading-none">
+                    MY
+                  </span>
+                  <span className="font-display font-extrabold text-2xl tracking-wide text-[#FF6B00] uppercase block leading-tight">
+                    LEAGUES
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-[#2A323B] flex items-center justify-between text-[11px]">
+                  <span className="text-[#8A99AD]">Joined</span>
+                  <span className="font-bold text-[#FF6B00]">
+                    {myLeagues.length} {myLeagues.length === 1 ? 'League' : 'Leagues'}
+                  </span>
+                </div>
               </button>
             </nav>
-          </>
+          </div>
         )}
 
-        {/* ================= MY LEAGUES SCREEN ================= */}
+        {/* ================= 2. MY LEAGUES SCREEN (Exact Reference Match) ================= */}
         {activeView === 'leagues' && (
           <div className="flex flex-col flex-1 w-full">
-            {/* TOP PILL HEADER: My LEAGUES */}
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-5">
-              <button
-                type="button"
-                onClick={() => setActiveView('home')}
-                aria-label="Back to Home"
-                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <h1 className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide">
-                My LEAGUES
-              </h1>
-            </header>
+            <TrackDayHeader
+              sectionTitle="MY LEAGUES"
+              onBack={() => setActiveView('home')}
+              onBellClick={() => setActiveView('notifications')}
+            />
 
-            {/* ACTION PILL BUTTONS: CREATE LEAGUE + & JOIN LEAGUE */}
-            <div className="flex flex-col items-center gap-3.5 px-4 mb-6">
+            {/* ACTION PILL BUTTONS: Orange CREATE LEAGUE + & Outlined JOIN LEAGUE */}
+            <div className="flex flex-col items-center gap-3 px-8 mb-6">
               <button
                 type="button"
                 onClick={handleOpenCreateLeague}
-                className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.98] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                className="w-full bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-full h-11 px-6 flex items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
                   CREATE LEAGUE +
                 </span>
               </button>
@@ -370,9 +506,9 @@ export function App() {
                   setIsSearchCountryOpen(false)
                   setActiveView('join-league')
                 }}
-                className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.98] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                className="w-full bg-transparent hover:bg-white/5 active:scale-[0.98] transition-all rounded-full h-11 px-6 border-[1.5px] border-white/80 flex items-center justify-center cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                   JOIN LEAGUE
                 </span>
               </button>
@@ -380,236 +516,259 @@ export function App() {
 
             {/* 2x2 GRID OF JOINED LEAGUES */}
             {myLeagues.length > 0 ? (
-              <section className="grid grid-cols-2 gap-4 content-start flex-1">
-                {myLeagues.map((league) => (
-                  <button
-                    key={league.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedLeague(league)
-                      setRolePreviewOverride(null)
-                      setActiveView('league-detail')
-                    }}
-                    className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] min-h-[210px] sm:min-h-[240px] p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
-                  >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase text-center leading-snug">
-                      {league.name}
-                    </span>
-                  </button>
-                ))}
+              <section className="grid grid-cols-2 gap-3.5 px-5 content-start flex-1">
+                {myLeagues.map((league, idx) =>
+                  renderLeagueCard(league, idx, () => {
+                    setSelectedLeague(league)
+                    setRolePreviewOverride(null)
+                    setActiveView('league-detail')
+                  })
+                )}
               </section>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-6 opacity-60">
-                <p className="text-[#32cd32] font-bold text-sm uppercase tracking-wider mb-1">
-                  No joined leagues yet
+              <div className="flex-1 mx-5 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center justify-center text-center">
+                <CardGraphicSvg index={0} className="w-14 h-10 mb-3 opacity-60" />
+                <p className="font-display font-extrabold text-lg text-white uppercase tracking-wider mb-1">
+                  NO JOINED LEAGUES YET
                 </p>
-                <p className="text-xs text-neutral-300">
-                  Press CREATE LEAGUE + or JOIN LEAGUE above to get started.
+                <p className="text-xs text-[#8A99AD] max-w-xs">
+                  Tap <strong className="text-[#FF6B00]">CREATE LEAGUE +</strong> or{' '}
+                  <strong className="text-white">JOIN LEAGUE</strong> above to start racing.
                 </p>
               </div>
             )}
           </div>
         )}
 
-        {/* ================= CREATE LEAGUE SCREEN ================= */}
+        {/* ================= 3. CREATE LEAGUE SCREEN ================= */}
         {activeView === 'create-league' && (
           <div className="flex flex-col flex-1 w-full justify-between">
-            <div className="flex flex-col items-center w-full">
-              {/* Top Pill: CREATE LEAGUE + */}
-              <div className="w-[85%] bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md mb-5">
-                <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
-                  CREATE LEAGUE +
-                </span>
-              </div>
+            <div className="flex flex-col w-full">
+              <TrackDayHeader
+                sectionTitle="CREATE LEAGUE +"
+                onBack={() => setActiveView('leagues')}
+                onBellClick={() => setActiveView('notifications')}
+              />
 
-              {/* Large Pill Input: LEAGUE NAME */}
-              <div className="w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-5">
-                <input
-                  type="text"
-                  value={createName}
-                  onChange={(e) => {
-                    setCreateName(e.target.value)
-                    setCreateError('')
-                  }}
-                  placeholder="LEAGUE NAME"
-                  className="w-full bg-transparent text-center text-[#32cd32] placeholder-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase focus:outline-none"
-                />
-              </div>
+              <div className="px-5 flex flex-col gap-4 mt-2">
+                {/* League Name Card Input */}
+                <div className="bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-2xl p-3.5 transition">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A99AD] mb-1">
+                    League Name
+                  </label>
+                  <input
+                    type="text"
+                    value={createName}
+                    onChange={(e) => {
+                      setCreateName(e.target.value)
+                      setCreateError('')
+                    }}
+                    placeholder="E.G. GĀZĒJU KAUSS"
+                    className="w-full bg-transparent font-display font-extrabold text-xl tracking-wider text-white placeholder-[#8A99AD]/40 uppercase focus:outline-none"
+                  />
+                </div>
 
-              {/* Pill Dropdown: COUNTRY (All 195+ countries with quick filter) */}
-              <div className="relative w-[85%] mb-4">
+                {/* Country Dropdown (All 195+ countries) */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateCountryOpen((prev) => !prev)}
+                    className="w-full bg-[#1C2228] border border-[#2A323B] hover:border-[#FF6B00]/60 rounded-2xl p-3.5 flex items-center justify-between text-left transition cursor-pointer"
+                  >
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8A99AD] mb-0.5">
+                        Country
+                      </span>
+                      <span className="font-display font-extrabold text-lg tracking-wider text-white uppercase">
+                        {createCountry || 'SELECT COUNTRY'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {createCountry && (
+                        <CountryFlagCircle country={createCountry} className="w-6 h-6" />
+                      )}
+                      <ChevronDown className="w-5 h-5 text-[#FF6B00]" />
+                    </div>
+                  </button>
+
+                  {isCreateCountryOpen && (
+                    <div className="absolute left-0 right-0 top-[76px] z-30 bg-[#1C2228] border border-[#FF6B00] rounded-2xl overflow-hidden shadow-2xl">
+                      <div className="bg-[#14191E] px-3.5 py-2.5 border-b border-[#2A323B] flex items-center gap-2">
+                        <Search className="w-4 h-4 text-[#FF6B00]" />
+                        <input
+                          type="text"
+                          value={createCountrySearch}
+                          onChange={(e) => setCreateCountrySearch(e.target.value)}
+                          placeholder="Search all countries..."
+                          autoFocus
+                          className="w-full bg-transparent text-xs font-bold text-white placeholder-[#8A99AD] uppercase focus:outline-none"
+                        />
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-[#2A323B]">
+                        {filteredCreateCountries.map((c) => {
+                          const isSelected = createCountry === c.name
+                          return (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => {
+                                setCreateCountry(c.name)
+                                setIsCreateCountryOpen(false)
+                                setCreateError('')
+                              }}
+                              className={`w-full px-4 py-2.5 flex items-center justify-between text-left font-display font-bold text-base tracking-wider uppercase transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#FF6B00] text-black'
+                                  : 'bg-[#1C2228] hover:bg-[#252D35] text-white'
+                              }`}
+                            >
+                              <span>{c.name}</span>
+                              <CountryFlagCircle country={c.name} className="w-5 h-5" />
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Private League Toggle */}
                 <button
                   type="button"
-                  onClick={() => setIsCreateCountryOpen((prev) => !prev)}
-                  className="w-full bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  onClick={() => {
+                    setCreateIsPrivate((prev) => !prev)
+                    setCreateError('')
+                  }}
+                  className="w-full bg-[#1C2228] border border-[#2A323B] hover:border-[#FF6B00]/60 rounded-2xl p-3.5 flex items-center justify-between transition cursor-pointer"
                 >
-                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate">
-                    {createCountry || 'COUNTRY'}
+                  <div className="text-left">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8A99AD] mb-0.5">
+                      Access Control
+                    </span>
+                    <span className="font-display font-extrabold text-lg tracking-wider text-white uppercase">
+                      PRIVATE LEAGUE
+                    </span>
+                  </div>
+                  <span
+                    className={`w-7 h-7 rounded-lg border-2 flex items-center justify-center transition ${
+                      createIsPrivate
+                        ? 'bg-[#FF6B00] border-[#FF6B00] text-black'
+                        : 'border-[#8A99AD] bg-transparent'
+                    }`}
+                  >
+                    {createIsPrivate && <Check className="w-4 h-4 stroke-[3.5]" />}
                   </span>
                 </button>
 
-                {isCreateCountryOpen && (
-                  <div className="absolute left-2 right-2 top-13 z-30 border-2 border-neutral-400 rounded-md overflow-hidden shadow-2xl bg-[#777777]">
-                    <div className="bg-[#222222] px-3 py-2 border-b border-neutral-400">
-                      <input
-                        type="text"
-                        value={createCountrySearch}
-                        onChange={(e) => setCreateCountrySearch(e.target.value)}
-                        placeholder="Type country name..."
-                        autoFocus
-                        className="w-full bg-transparent text-xs font-extrabold text-[#32cd32] placeholder-neutral-500 uppercase focus:outline-none"
-                      />
-                    </div>
-                    <div className="max-h-60 overflow-y-auto">
-                      {filteredCreateCountries.map((c) => {
-                        const isSelected = createCountry === c.name
-                        return (
-                          <button
-                            key={c.code}
-                            type="button"
-                            onClick={() => {
-                              setCreateCountry(c.name)
-                              setIsCreateCountryOpen(false)
-                              setCreateError('')
-                            }}
-                            className={`w-full px-4 py-2.5 text-left font-extrabold text-sm sm:text-base tracking-wide uppercase border-b border-neutral-400 last:border-b-0 transition cursor-pointer ${
-                              isSelected
-                                ? 'bg-[#222222] text-[#32cd32]'
-                                : 'bg-[#777777] hover:bg-[#666666] text-[#32cd32]'
-                            }`}
-                          >
-                            {c.name}
-                          </button>
-                        )
-                      })}
-                    </div>
+                {/* Conditional Password Input when Private League is checked */}
+                {createIsPrivate && (
+                  <div className="bg-[#1C2228] border border-[#FF6B00]/60 rounded-2xl p-3.5 transition">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#FF6B00] mb-1">
+                      League Password
+                    </label>
+                    <input
+                      type="password"
+                      value={createPassword}
+                      onChange={(e) => {
+                        setCreatePassword(e.target.value)
+                        setCreateError('')
+                      }}
+                      placeholder="ENTER SECRET PASSWORD"
+                      className="w-full bg-transparent font-display font-extrabold text-lg tracking-wider text-white placeholder-[#8A99AD]/40 focus:outline-none"
+                    />
                   </div>
                 )}
+
+                {createError && (
+                  <p className="text-xs font-bold text-red-400 text-center">
+                    {createError}
+                  </p>
+                )}
               </div>
-
-              {/* Pill Toggle: Private LEAGUE + Checkbox */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCreateIsPrivate((prev) => !prev)
-                  setCreateError('')
-                }}
-                className="relative w-[85%] bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md mb-5 cursor-pointer"
-              >
-                <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide">
-                  Private LEAGUE
-                </span>
-                <span className="absolute right-5 w-6 h-6 rounded border-2 border-[#32cd32] flex items-center justify-center">
-                  {createIsPrivate && (
-                    <Check className="w-4 h-4 text-[#32cd32]" strokeWidth={3.5} />
-                  )}
-                </span>
-              </button>
-
-              {/* Conditional Pill Input: Password (only visible when Private LEAGUE is checked) */}
-              {createIsPrivate && (
-                <div className="w-[85%] bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md mb-4">
-                  <input
-                    type="password"
-                    value={createPassword}
-                    onChange={(e) => {
-                      setCreatePassword(e.target.value)
-                      setCreateError('')
-                    }}
-                    placeholder="Password"
-                    className="w-full bg-transparent text-center text-[#32cd32] placeholder-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide focus:outline-none"
-                  />
-                </div>
-              )}
-
-              {createError && (
-                <p className="text-xs font-bold text-red-400 mt-1 text-center">
-                  {createError}
-                </p>
-              )}
             </div>
 
-            {/* Bottom Two Cards: CANCEL & CONFIRM */}
-            <div className="grid grid-cols-2 gap-4 w-full mt-auto pt-6">
+            {/* Bottom Two Action Cards: CANCEL & CONFIRM */}
+            <div className="grid grid-cols-2 gap-3.5 px-5 w-full mt-auto pt-6">
               <button
                 type="button"
                 onClick={() => setActiveView('leagues')}
-                className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] h-64 sm:h-72 p-4 flex items-center justify-center shadow-lg cursor-pointer"
+                className="bg-[#1C2228] hover:bg-[#252D35] border-[1.5px] border-white/80 active:scale-[0.98] transition-all rounded-2xl h-36 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
+                <span className="font-display font-extrabold text-2xl tracking-wider text-white uppercase">
                   CANCEL
+                </span>
+                <span className="text-[10px] text-[#8A99AD] uppercase mt-1">
+                  Discard changes
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={handleConfirmCreateLeague}
-                className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] h-64 sm:h-72 p-4 flex items-center justify-center shadow-lg cursor-pointer"
+                className="bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-2xl h-36 p-4 flex flex-col items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
+                <span className="font-display font-extrabold text-2xl tracking-wider text-black uppercase">
                   CONFIRM
+                </span>
+                <span className="text-[10px] text-black/80 font-bold uppercase mt-1">
+                  Create & Open
                 </span>
               </button>
             </div>
           </div>
         )}
 
-        {/* ================= JOIN LEAGUE (SEARCH) SCREEN ================= */}
+        {/* ================= 4. JOIN LEAGUE (SEARCH) SCREEN ================= */}
         {activeView === 'join-league' && (
           <div className="flex flex-col flex-1 w-full">
-            {/* Top Header Pill: JOIN LEAGUE */}
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-4">
-              <button
-                type="button"
-                onClick={() => setActiveView('leagues')}
-                aria-label="Back to My Leagues"
-                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <h1 className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase">
-                JOIN LEAGUE
-              </h1>
-            </header>
+            <TrackDayHeader
+              sectionTitle="JOIN LEAGUE"
+              onBack={() => setActiveView('leagues')}
+              onBellClick={() => setActiveView('notifications')}
+            />
 
-            {/* Search Inputs: SEARCH LEAGUE & SEARCH COUNTRY */}
-            <div className="flex flex-col items-center gap-3 px-4 mb-6">
-              {/* SEARCH LEAGUE by Name */}
-              <div className="w-full bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md">
+            {/* Search Controls: SEARCH LEAGUE & SEARCH COUNTRY */}
+            <div className="flex flex-col items-center gap-3 px-8 mb-6">
+              {/* SEARCH LEAGUE Input Pill */}
+              <div className="w-full bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-5 flex items-center gap-2 shadow-md">
+                <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
                 <input
                   type="text"
                   value={searchLeagueQuery}
                   onChange={(e) => setSearchLeagueQuery(e.target.value)}
                   placeholder="SEARCH LEAGUE"
-                  className="w-full bg-transparent text-center text-[#32cd32] placeholder-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase focus:outline-none"
+                  className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-white/80 uppercase focus:outline-none pr-4"
                 />
               </div>
 
-              {/* SEARCH COUNTRY Dropdown (All 195+ countries) */}
+              {/* SEARCH COUNTRY Dropdown Pill */}
               <div className="relative w-full">
                 <button
                   type="button"
                   onClick={() => setIsSearchCountryOpen((prev) => !prev)}
-                  className="w-full bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  className="w-full bg-transparent hover:bg-white/5 border-[1.5px] border-white/80 rounded-full h-11 px-5 flex items-center justify-between cursor-pointer"
                 >
-                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate">
+                  <span className="w-4" />
+                  <span className="font-display font-extrabold text-base tracking-wider text-white uppercase truncate">
                     {searchCountryFilter || 'SEARCH COUNTRY'}
                   </span>
+                  <ChevronDown className="w-4 h-4 text-[#FF6B00] shrink-0" />
                 </button>
 
                 {isSearchCountryOpen && (
-                  <div className="absolute left-2 right-2 top-13 z-30 border-2 border-neutral-400 rounded-md overflow-hidden shadow-2xl bg-[#777777]">
-                    <div className="bg-[#222222] px-3 py-2 border-b border-neutral-400">
+                  <div className="absolute left-0 right-0 top-12 z-30 bg-[#1C2228] border border-[#FF6B00] rounded-2xl overflow-hidden shadow-2xl">
+                    <div className="bg-[#14191E] px-3.5 py-2 border-b border-[#2A323B] flex items-center gap-2">
+                      <Search className="w-3.5 h-3.5 text-[#FF6B00]" />
                       <input
                         type="text"
                         value={searchCountryInput}
                         onChange={(e) => setSearchCountryInput(e.target.value)}
                         placeholder="Type country name..."
                         autoFocus
-                        className="w-full bg-transparent text-xs font-extrabold text-[#32cd32] placeholder-neutral-500 uppercase focus:outline-none"
+                        className="w-full bg-transparent text-xs font-bold text-white placeholder-[#8A99AD] uppercase focus:outline-none"
                       />
                     </div>
-                    <div className="max-h-60 overflow-y-auto">
+                    <div className="max-h-56 overflow-y-auto divide-y divide-[#2A323B]">
                       {searchCountryFilter && (
                         <button
                           type="button"
@@ -617,15 +776,13 @@ export function App() {
                             setSearchCountryFilter('')
                             setIsSearchCountryOpen(false)
                           }}
-                          className="w-full px-4 py-2 text-left font-extrabold text-xs tracking-wide uppercase bg-[#222222] text-neutral-300 border-b border-neutral-400 cursor-pointer"
+                          className="w-full px-4 py-2 text-left font-display font-bold text-sm tracking-wider uppercase bg-[#14191E] text-[#38BDF8] cursor-pointer"
                         >
                           ALL COUNTRIES
                         </button>
                       )}
-                      {filteredSearchCountries.map((c, idx) => {
-                        const isSelected =
-                          searchCountryFilter === c.name ||
-                          (!searchCountryFilter && idx === 0)
+                      {filteredSearchCountries.map((c) => {
+                        const isSelected = searchCountryFilter === c.name
                         return (
                           <button
                             key={c.code}
@@ -634,13 +791,14 @@ export function App() {
                               setSearchCountryFilter(c.name)
                               setIsSearchCountryOpen(false)
                             }}
-                            className={`w-full px-4 py-2.5 text-left font-extrabold text-sm sm:text-base tracking-wide uppercase border-b border-neutral-400 last:border-b-0 transition cursor-pointer ${
+                            className={`w-full px-4 py-2.5 flex items-center justify-between text-left font-display font-bold text-base tracking-wider uppercase transition cursor-pointer ${
                               isSelected
-                                ? 'bg-[#222222] text-[#32cd32]'
-                                : 'bg-[#777777] hover:bg-[#666666] text-[#32cd32]'
+                                ? 'bg-[#FF6B00] text-black'
+                                : 'bg-[#1C2228] hover:bg-[#252D35] text-white'
                             }`}
                           >
-                            {c.name}
+                            <span>{c.name}</span>
+                            <CountryFlagCircle country={c.name} className="w-5 h-5" />
                           </button>
                         )
                       })}
@@ -652,39 +810,22 @@ export function App() {
 
             {/* 2x2 Grid of Search Results */}
             {filteredSearchLeagues.length > 0 ? (
-              <section className="grid grid-cols-2 gap-4 content-start flex-1">
-                {filteredSearchLeagues.map((league) => (
-                  <button
-                    key={league.id}
-                    type="button"
-                    onClick={() => handleSelectLeagueFromSearch(league)}
-                    className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] min-h-[220px] sm:min-h-[245px] p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
-                  >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase text-center leading-snug mt-4">
-                      {league.name}
-                    </span>
-
-                    <div className="mt-3 flex flex-col items-center">
-                      <span className="text-neutral-400 text-xs sm:text-sm font-medium leading-tight">
-                        {league.isPrivate ? 'Private' : 'Public'}
-                      </span>
-                      <span className="text-neutral-400 text-xs sm:text-sm font-medium uppercase leading-tight">
-                        LEAGUE
-                      </span>
-                    </div>
-
-                    <div className="mt-2">
-                      <CountryFlagCircle country={league.country} className="w-7 h-7" />
-                    </div>
-                  </button>
-                ))}
+              <section className="grid grid-cols-2 gap-3.5 px-5 content-start flex-1">
+                {filteredSearchLeagues.map((league, idx) =>
+                  renderLeagueCard(
+                    league,
+                    idx,
+                    () => handleSelectLeagueFromSearch(league),
+                    true
+                  )
+                )}
               </section>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-6 opacity-60">
-                <p className="text-[#32cd32] font-bold text-sm uppercase tracking-wider mb-1">
-                  No leagues found
+              <div className="flex-1 mx-5 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center justify-center text-center">
+                <p className="font-display font-extrabold text-lg text-white uppercase tracking-wider mb-1">
+                  NO LEAGUES FOUND
                 </p>
-                <p className="text-xs text-neutral-300">
+                <p className="text-xs text-[#8A99AD] max-w-xs">
                   Create a new league first or adjust your search filters.
                 </p>
               </div>
@@ -692,174 +833,176 @@ export function App() {
           </div>
         )}
 
-        {/* ================= PRIVATE LEAGUE PASSWORD PROMPT SCREEN ================= */}
+        {/* ================= 5. PRIVATE LEAGUE PASSWORD PROMPT SCREEN ================= */}
         {activeView === 'join-league-password' && pendingJoinLeague && (
-          <div className="flex flex-col flex-1 w-full items-center">
-            {/* Top Header Pill: League Name */}
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-5">
-              <button
-                type="button"
-                onClick={() => setActiveView('join-league')}
-                aria-label="Back to Join League"
-                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <h1 className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase truncate max-w-[70%]">
-                {pendingJoinLeague.name}
-              </h1>
-            </header>
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={pendingJoinLeague.name}
+              sectionSubtitle="PRIVATE LEAGUE ACCESS"
+              onBack={() => setActiveView('join-league')}
+              onBellClick={() => setActiveView('notifications')}
+            />
 
-            {/* Country Pill */}
-            <div className="w-[82%] bg-[#222222] rounded-full h-12 px-6 flex items-center justify-center shadow-md mb-16">
-              <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
-                {pendingJoinLeague.country}
-              </span>
-            </div>
+            <div className="px-6 flex flex-col items-center flex-1 justify-center">
+              <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center text-center shadow-xl">
+                <div className="w-12 h-12 rounded-full bg-[#FF6B00]/15 border border-[#FF6B00] flex items-center justify-center text-[#FF6B00] mb-3">
+                  <Lock className="w-6 h-6" />
+                </div>
 
-            {/* Password Input Pill */}
-            <form onSubmit={handleSubmitJoinPassword} className="w-full flex flex-col items-center">
-              <div className="w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg">
-                <input
-                  type="password"
-                  value={joinPasswordInput}
-                  onChange={(e) => {
-                    setJoinPasswordInput(e.target.value)
-                    setJoinPasswordError('')
-                  }}
-                  placeholder="PASSWORD"
-                  autoFocus
-                  className="w-full bg-transparent text-center text-[#32cd32] placeholder-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide focus:outline-none"
-                />
+                <h2 className="font-display font-extrabold text-2xl text-white uppercase tracking-wide">
+                  {pendingJoinLeague.name}
+                </h2>
+
+                <div className="mt-1 mb-6 flex items-center gap-2 px-3 py-1 rounded-full bg-[#14191E] border border-[#2A323B]">
+                  <CountryFlagCircle country={pendingJoinLeague.country} className="w-4 h-4" />
+                  <span className="text-xs font-extrabold text-[#FF6B00] uppercase tracking-wider">
+                    {pendingJoinLeague.country}
+                  </span>
+                </div>
+
+                <form onSubmit={handleSubmitJoinPassword} className="w-full space-y-4">
+                  <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-12 px-5 flex items-center justify-center">
+                    <input
+                      type="password"
+                      value={joinPasswordInput}
+                      onChange={(e) => {
+                        setJoinPasswordInput(e.target.value)
+                        setJoinPasswordError('')
+                      }}
+                      placeholder="PASSWORD"
+                      autoFocus
+                      className="w-full bg-transparent text-center font-display font-extrabold text-lg tracking-wider text-white placeholder-[#8A99AD] focus:outline-none"
+                    />
+                  </div>
+
+                  {joinPasswordError && (
+                    <p className="text-xs font-bold text-red-400">
+                      {joinPasswordError}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="w-full bg-[#FF6B00] hover:bg-[#ff7b1a] text-black font-display font-extrabold text-base tracking-wider uppercase h-11 rounded-full shadow-lg shadow-[#FF6B00]/20 transition cursor-pointer"
+                  >
+                    UNLOCK & JOIN LEAGUE
+                  </button>
+                </form>
               </div>
-
-              {joinPasswordError && (
-                <p className="text-xs font-bold text-red-400 mt-3">
-                  {joinPasswordError}
-                </p>
-              )}
-
-              {joinPasswordInput.trim().length > 0 && (
-                <button
-                  type="submit"
-                  className="mt-6 px-8 py-3 rounded-full bg-[#222222] border border-[#32cd32]/50 text-[#32cd32] font-extrabold text-sm uppercase tracking-wider hover:bg-[#2a2a2a] transition cursor-pointer"
-                >
-                  ENTER LEAGUE
-                </button>
-              )}
-            </form>
+            </div>
           </div>
         )}
 
-        {/* ================= LEAGUE HOME PAGE SCREEN ================= */}
+        {/* ================= 6. LEAGUE HOME PAGE SCREEN ================= */}
         {activeView === 'league-detail' && selectedLeague && (
           <div className="flex flex-col flex-1 w-full">
-            {/* TOP PILL HEADER: LEAGUE NAME + HOME PAGE SUBTITLE + (...) MENU BUTTON */}
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-6">
-              <button
-                type="button"
-                onClick={() => setActiveView('leagues')}
-                aria-label="Back to My Leagues"
-                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="HOME PAGE"
+              onBack={() => setActiveView('leagues')}
+              showMoreButton
+              onMoreClick={() => setActiveView('league-options')}
+            />
 
-              <div className="flex flex-col items-center justify-center text-center max-w-[60%]">
-                <h1 className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate w-full">
-                  {selectedLeague.name}
-                </h1>
-                <span className="text-[#32cd32] font-extrabold text-[10px] sm:text-xs tracking-wider uppercase leading-none mt-0.5">
-                  HOME PAGE
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveView('league-options')}
-                aria-label="League Settings"
-                className="absolute right-4 w-12 h-12 rounded-full bg-[#3a3a3a] flex items-center justify-center hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <MoreHorizontal className="w-6 h-6 text-[#32cd32]" strokeWidth={2.5} />
-              </button>
-            </header>
-
-            {/* 3 STACKED LARGE CARDS: STANDING, RACES, HISTORY (HALL OF FAME) */}
-            <div className="flex flex-col gap-5 flex-1 justify-between">
+            {/* 3 STACKED TELEMETRY CARDS: STANDING, RACES, HISTORY (HALL OF FAME) */}
+            <div className="flex flex-col gap-4 px-5 flex-1 justify-between">
               <button
                 type="button"
                 onClick={() => setActiveView('league-standing')}
-                className="w-full flex-1 min-h-[165px] bg-[#222222] hover:bg-[#272727] active:scale-[0.99] transition-all rounded-[36px] p-6 flex items-center justify-center shadow-lg cursor-pointer"
+                className="w-full flex-1 bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.99] transition-all rounded-2xl p-5 flex items-center justify-between text-left shadow-lg cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
-                  STANDING
-                </span>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#FF6B00] block mb-1">
+                    CHAMPIONSHIP TABLE
+                  </span>
+                  <span className="font-display font-extrabold text-3xl tracking-wide text-white uppercase block leading-none">
+                    STANDING
+                  </span>
+                  <span className="text-xs text-[#8A99AD] mt-2 block">
+                    Driver & Team points leaderboard
+                  </span>
+                </div>
+                <div className="w-14 h-14 rounded-2xl bg-[#14191E] border border-[#2A323B] flex items-center justify-center text-[#FF6B00]">
+                  <Trophy className="w-7 h-7" />
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveView('league-races')}
-                className="w-full flex-1 min-h-[165px] bg-[#222222] hover:bg-[#272727] active:scale-[0.99] transition-all rounded-[36px] p-6 flex items-center justify-center shadow-lg cursor-pointer"
+                className="w-full flex-1 bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#38BDF8]/60 active:scale-[0.99] transition-all rounded-2xl p-5 flex items-center justify-between text-left shadow-lg cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
-                  RACES
-                </span>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#38BDF8] block mb-1">
+                    CALENDAR & RESULTS
+                  </span>
+                  <span className="font-display font-extrabold text-3xl tracking-wide text-white uppercase block leading-none">
+                    RACES
+                  </span>
+                  <span className="text-xs text-[#8A99AD] mt-2 block">
+                    Upcoming schedules & lap sessions
+                  </span>
+                </div>
+                <div className="w-14 h-14 rounded-2xl bg-[#14191E] border border-[#2A323B] flex items-center justify-center text-[#38BDF8]">
+                  <Flag className="w-7 h-7" />
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveView('league-hall-of-fame')}
-                className="w-full flex-1 min-h-[165px] bg-[#222222] hover:bg-[#272727] active:scale-[0.99] transition-all rounded-[36px] p-6 flex flex-col items-center justify-center shadow-lg cursor-pointer"
+                className="w-full flex-1 bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.99] transition-all rounded-2xl p-5 flex items-center justify-between text-left shadow-lg cursor-pointer"
               >
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center leading-snug">
-                  HISTORY
-                </span>
-                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center leading-snug">
-                  (HALL OF FAME)
-                </span>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#FF6B00] block mb-1">
+                    LEAGUE ARCHIVE
+                  </span>
+                  <span className="font-display font-extrabold text-2xl sm:text-3xl tracking-wide text-white uppercase block leading-none">
+                    HISTORY <span className="text-[#FF6B00]">(HALL OF FAME)</span>
+                  </span>
+                  <span className="text-xs text-[#8A99AD] mt-2 block">
+                    All-time records, champions & fastest laps
+                  </span>
+                </div>
+                <div className="w-14 h-14 rounded-2xl bg-[#14191E] border border-[#2A323B] flex items-center justify-center text-[#FF6B00]">
+                  <Medal className="w-7 h-7" />
+                </div>
               </button>
             </div>
           </div>
         )}
 
-        {/* ================= LEAGUE SETTINGS SCREEN ================= */}
+        {/* ================= 7. LEAGUE SETTINGS SCREEN (Role-Based) ================= */}
         {activeView === 'league-options' && selectedLeague && (
           <div className="flex flex-col flex-1 w-full">
-            {/* TOP PILL HEADER: LEAGUE NAME + SETTINGS */}
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-4">
-              <button
-                type="button"
-                onClick={() => setActiveView('league-detail')}
-                aria-label="Back to League Home Page"
-                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="SETTINGS"
+              onBack={() => setActiveView('league-detail')}
+              onBellClick={() => setActiveView('notifications')}
+            />
 
-              <div className="flex flex-col items-center justify-center text-center max-w-[70%]">
-                <h1 className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate w-full leading-tight">
-                  {selectedLeague.name}
-                </h1>
-                <span className="text-[#32cd32] font-extrabold text-sm sm:text-base tracking-wide uppercase leading-tight">
-                  SETTINGS
-                </span>
-              </div>
-            </header>
-
-            <div className="flex flex-col gap-5 flex-1 justify-start">
+            <div className="flex flex-col gap-4 px-5 flex-1 justify-start">
               {/* 1. ONLY ADMINS BOX — Visible only when user is Admin */}
               {effectiveRole === 'admin' && (
-                <section className="w-full rounded-[38px] border-[3.5px] border-black px-5 pt-2.5 pb-5 flex flex-col items-center gap-3.5">
-                  <span className="text-[11px] font-semibold tracking-wider uppercase text-black">
-                    ONLY ADMINS
-                  </span>
+                <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
+                    <span className="text-[10px] font-extrabold tracking-widest uppercase text-[#FF6B00]">
+                      ONLY ADMINS
+                    </span>
+                    <span className="text-[10px] text-[#8A99AD] font-semibold">
+                      League Control
+                    </span>
+                  </div>
 
+                  {/* Primary Highlighted Button: UPLOAD RACE RESULTS */}
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('UPLOAD RACE RESULTS')}
-                    className="w-full bg-[#32cd32] hover:bg-[#2dc02d] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 shadow-md shadow-[#FF6B00]/20 cursor-pointer"
                   >
-                    <span className="text-[#1a1a1a] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <Upload className="w-4 h-4 text-black stroke-[2.5]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
                       UPLOAD RACE RESULTS
                     </span>
                   </button>
@@ -867,9 +1010,10 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('ASSIGN ROLES')}
-                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <UserCog className="w-4 h-4 text-[#FF6B00]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                       ASSIGN ROLES
                     </span>
                   </button>
@@ -877,9 +1021,10 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('MANAGE RACERS')}
-                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <Users className="w-4 h-4 text-[#FF6B00]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                       MANAGE RACERS
                     </span>
                   </button>
@@ -887,9 +1032,10 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('SCHEDULE RACE')}
-                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <CalendarPlus className="w-4 h-4 text-[#FF6B00]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                       SCHEDULE RACE
                     </span>
                   </button>
@@ -897,9 +1043,10 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('DELETE LEAGUE')}
-                    className="w-full bg-[#c92a2a] hover:bg-[#b52525] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#dc2626] hover:bg-[#b91c1c] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 shadow-md cursor-pointer mt-1"
                   >
-                    <span className="text-black font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <Trash2 className="w-4 h-4 text-white" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                       DELETE LEAGUE
                     </span>
                   </button>
@@ -908,17 +1055,23 @@ export function App() {
 
               {/* 2. ONLY TEAM CAPTAINS BOX — Visible to Admins & Team Captains */}
               {(effectiveRole === 'admin' || effectiveRole === 'team_captain') && (
-                <section className="w-full rounded-[38px] border-[3.5px] border-black px-5 pt-2.5 pb-5 flex flex-col items-center gap-3.5">
-                  <span className="text-[11px] font-semibold tracking-wider uppercase text-black">
-                    ONLY TEAM CAPTAINS
-                  </span>
+                <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
+                  <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
+                    <span className="text-[10px] font-extrabold tracking-widest uppercase text-[#38BDF8]">
+                      ONLY TEAM CAPTAINS
+                    </span>
+                    <span className="text-[10px] text-[#8A99AD] font-semibold">
+                      Team Management
+                    </span>
+                  </div>
 
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('INVITE RACERS')}
-                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <UserPlus className="w-4 h-4 text-[#38BDF8]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                       INVITE RACERS
                     </span>
                   </button>
@@ -926,9 +1079,10 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => handleOpenSettingAction('CREATE TEAM')}
-                    className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                    <ShieldPlus className="w-4 h-4 text-[#38BDF8]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                       CREATE TEAM
                     </span>
                   </button>
@@ -936,30 +1090,39 @@ export function App() {
               )}
 
               {/* 3. ONLY RACERS BOX — Visible to Admins, Team Captains, and Racers */}
-              <section className="w-full rounded-[38px] border-[3.5px] border-black px-5 pt-2.5 pb-5 flex flex-col items-center gap-3.5">
-                <span className="text-[11px] font-semibold tracking-wider uppercase text-black">
-                  ONLY RACERS
-                </span>
+              <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
+                <div className="flex items-center justify-between border-b border-[#2A323B] pb-2 mb-1">
+                  <span className="text-[10px] font-extrabold tracking-widest uppercase text-[#8A99AD]">
+                    ONLY RACERS
+                  </span>
+                  <span className="text-[10px] text-[#8A99AD] font-semibold">
+                    Driver Actions
+                  </span>
+                </div>
 
                 <button
                   type="button"
                   onClick={() => handleOpenSettingAction('REQUEST TO JOIN TEAM')}
-                  className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.99] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+                  className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                  <Send className="w-4 h-4 text-[#FF6B00]" />
+                  <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
                     REQUEST TO JOIN TEAM
                   </span>
                 </button>
               </section>
             </div>
 
-            {/* Subtle Role Preview Bar at the very bottom for testing what each role sees */}
-            <div className="mt-5 pt-2 border-t border-black/20 flex items-center justify-between text-[10px] text-neutral-400">
+            {/* Subtle Role Preview Bar at the bottom for testing what each role sees */}
+            <div className="mx-5 mt-5 pt-3 border-t border-[#2A323B] flex items-center justify-between text-[10px] text-[#8A99AD]">
               <span>
-                Your Role: <strong className="text-[#32cd32] uppercase">{actualUserRole.replace('_', ' ')}</strong>
+                Role:{' '}
+                <strong className="text-[#FF6B00] uppercase">
+                  {actualUserRole.replace('_', ' ')}
+                </strong>
               </span>
               <div className="flex items-center gap-1">
-                <span>Preview as:</span>
+                <span>View as:</span>
                 {(['admin', 'team_captain', 'racer'] as LeagueRole[]).map((r) => (
                   <button
                     key={r}
@@ -969,8 +1132,8 @@ export function App() {
                     }
                     className={`px-2 py-0.5 rounded-full uppercase font-bold cursor-pointer transition ${
                       effectiveRole === r
-                        ? 'bg-[#222222] text-[#32cd32] border border-[#32cd32]/40'
-                        : 'bg-black/20 text-neutral-400 hover:text-white'
+                        ? 'bg-[#FF6B00] text-black'
+                        : 'bg-[#1C2228] text-[#8A99AD] hover:text-white'
                     }`}
                   >
                     {r === 'team_captain' ? 'Captain' : r}
@@ -989,59 +1152,48 @@ export function App() {
           activeView === 'history' ||
           activeView === 'notifications') && (
           <div className="flex flex-col flex-1 w-full">
-            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-6">
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeView === 'league-setting-action') {
-                    setActiveView('league-options')
-                  } else if (
-                    activeView === 'league-standing' ||
-                    activeView === 'league-races' ||
-                    activeView === 'league-hall-of-fame'
-                  ) {
-                    setActiveView('league-detail')
-                  } else {
-                    setActiveView('home')
-                  }
-                }}
-                aria-label="Go Back"
-                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div className="flex flex-col items-center justify-center text-center max-w-[70%]">
-                <h1 className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate w-full">
-                  {activeView === 'league-standing' && 'STANDING'}
-                  {activeView === 'league-races' && 'RACES'}
-                  {activeView === 'league-hall-of-fame' && 'HISTORY (HALL OF FAME)'}
-                  {activeView === 'league-setting-action' && selectedSettingActionTitle}
-                  {activeView === 'history' && 'RACE HISTORY'}
-                  {activeView === 'notifications' && 'NOTIFICATIONS'}
-                </h1>
-                {selectedLeague &&
-                  (activeView === 'league-standing' ||
-                    activeView === 'league-races' ||
-                    activeView === 'league-hall-of-fame' ||
-                    activeView === 'league-setting-action') && (
-                    <span className="text-[#32cd32] font-extrabold text-[10px] sm:text-xs tracking-wider uppercase leading-none mt-0.5">
-                      {selectedLeague.name}
-                    </span>
-                  )}
-              </div>
-            </header>
+            <TrackDayHeader
+              sectionTitle={
+                activeView === 'league-standing'
+                  ? 'STANDING'
+                  : activeView === 'league-races'
+                    ? 'RACES'
+                    : activeView === 'league-hall-of-fame'
+                      ? 'HALL OF FAME'
+                      : activeView === 'league-setting-action'
+                        ? selectedSettingActionTitle
+                        : activeView === 'history'
+                          ? 'RACE HISTORY'
+                          : 'NOTIFICATIONS'
+              }
+              sectionSubtitle={selectedLeague?.name}
+              onBack={() => {
+                if (activeView === 'league-setting-action') {
+                  setActiveView('league-options')
+                } else if (
+                  activeView === 'league-standing' ||
+                  activeView === 'league-races' ||
+                  activeView === 'league-hall-of-fame'
+                ) {
+                  setActiveView('league-detail')
+                } else {
+                  setActiveView('home')
+                }
+              }}
+              onBellClick={() => setActiveView('notifications')}
+            />
 
-            <div className="flex-1 bg-[#222222] rounded-[36px] p-6 flex flex-col items-center justify-center text-center shadow-lg">
-              <p className="text-[#32cd32] font-extrabold text-lg uppercase mb-2">
+            <div className="flex-1 mx-5 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-lg">
+              <p className="font-display font-extrabold text-2xl text-white uppercase tracking-wide mb-1">
                 {activeView === 'league-standing' && `${selectedLeague?.name} — Standings`}
-                {activeView === 'league-races' && `${selectedLeague?.name} — Races & Schedules`}
+                {activeView === 'league-races' && `${selectedLeague?.name} — Races`}
                 {activeView === 'league-hall-of-fame' && `${selectedLeague?.name} — Hall of Fame`}
                 {activeView === 'league-setting-action' && selectedSettingActionTitle}
                 {activeView === 'history' && 'Race History View'}
                 {activeView === 'notifications' && 'Notifications Center'}
               </p>
-              <p className="text-sm text-neutral-400 max-w-xs mb-6">
-                Ready for your next mockup & instructions!
+              <p className="text-xs text-[#8A99AD] max-w-xs mb-6">
+                Ready for your next skeleton mockup — I will build it in this Track Day Pro design!
               </p>
               <button
                 type="button"
@@ -1058,15 +1210,9 @@ export function App() {
                     setActiveView('home')
                   }
                 }}
-                className="px-6 py-2.5 rounded-full bg-[#32cd32] text-black font-extrabold text-sm hover:bg-[#28b428] transition cursor-pointer"
+                className="px-6 py-2.5 rounded-full bg-[#FF6B00] text-black font-display font-extrabold text-sm tracking-wider uppercase hover:bg-[#ff7b1a] transition cursor-pointer"
               >
-                {activeView === 'league-setting-action'
-                  ? 'Back to League Settings'
-                  : activeView === 'league-standing' ||
-                      activeView === 'league-races' ||
-                      activeView === 'league-hall-of-fame'
-                    ? `Back to ${selectedLeague?.name}`
-                    : 'Back to Homescreen'}
+                Go Back
               </button>
             </div>
           </div>
