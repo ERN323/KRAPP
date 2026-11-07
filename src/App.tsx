@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, ArrowLeft } from 'lucide-react'
+import { Bell, ArrowLeft, MoreHorizontal } from 'lucide-react'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
 import { HELMET_OPTIONS, HelmetSvg } from './components/HelmetIcons'
 
@@ -35,6 +35,10 @@ export type AppView =
   | 'create-league'
   | 'join-league'
   | 'league-detail'
+  | 'league-standing'
+  | 'league-races'
+  | 'league-hall-of-fame'
+  | 'league-options'
   | 'notifications'
 
 export function App() {
@@ -49,7 +53,7 @@ export function App() {
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [activeView, setActiveView] = useState<AppView>('home')
-  const [selectedLeague, setSelectedLeague] = useState<LeagueItem | null>(null)
+  const [selectedLeague, setSelectedLeague] = useState<LeagueItem>(DEFAULT_LEAGUES[0])
 
   useEffect(() => {
     try {
@@ -235,43 +239,140 @@ export function App() {
           </div>
         )}
 
+        {activeView === 'league-detail' && (
+          <div className="flex flex-col flex-1 w-full">
+            {/* TOP PILL HEADER: LEAGUE NAME + HOME PAGE SUBTITLE + (...) MENU BUTTON */}
+            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-6">
+              <button
+                type="button"
+                onClick={() => setActiveView('leagues')}
+                aria-label="Back to My Leagues"
+                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+
+              <div className="flex flex-col items-center justify-center text-center max-w-[60%]">
+                <h1 className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate w-full">
+                  {selectedLeague.name}
+                </h1>
+                <span className="text-[#32cd32] font-extrabold text-[10px] sm:text-xs tracking-wider uppercase leading-none mt-0.5">
+                  HOME PAGE
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('league-options')}
+                aria-label="League Options"
+                className="absolute right-4 w-12 h-12 rounded-full bg-[#3a3a3a] flex items-center justify-center hover:bg-[#484848] active:scale-95 transition cursor-pointer"
+              >
+                <MoreHorizontal className="w-6 h-6 text-[#32cd32]" strokeWidth={2.5} />
+              </button>
+            </header>
+
+            {/* 3 STACKED LARGE CARDS: STANDING, RACES, HISTORY (HALL OF FAME) */}
+            <div className="flex flex-col gap-5 flex-1 justify-between">
+              <button
+                type="button"
+                onClick={() => setActiveView('league-standing')}
+                className="w-full flex-1 min-h-[165px] bg-[#222222] hover:bg-[#272727] active:scale-[0.99] transition-all rounded-[36px] p-6 flex items-center justify-center shadow-lg cursor-pointer"
+              >
+                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
+                  STANDING
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('league-races')}
+                className="w-full flex-1 min-h-[165px] bg-[#222222] hover:bg-[#272727] active:scale-[0.99] transition-all rounded-[36px] p-6 flex items-center justify-center shadow-lg cursor-pointer"
+              >
+                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center">
+                  RACES
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('league-hall-of-fame')}
+                className="w-full flex-1 min-h-[165px] bg-[#222222] hover:bg-[#272727] active:scale-[0.99] transition-all rounded-[36px] p-6 flex flex-col items-center justify-center shadow-lg cursor-pointer"
+              >
+                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center leading-snug">
+                  HISTORY
+                </span>
+                <span className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase text-center leading-snug">
+                  (HALL OF FAME)
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {(activeView === 'create-league' ||
           activeView === 'join-league' ||
-          activeView === 'league-detail' ||
+          activeView === 'league-standing' ||
+          activeView === 'league-races' ||
+          activeView === 'league-hall-of-fame' ||
+          activeView === 'league-options' ||
           activeView === 'history' ||
           activeView === 'notifications') && (
           <div className="flex flex-col flex-1 w-full">
             <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-6">
               <button
                 type="button"
-                onClick={() =>
-                  setActiveView(
+                onClick={() => {
+                  if (
+                    activeView === 'league-standing' ||
+                    activeView === 'league-races' ||
+                    activeView === 'league-hall-of-fame' ||
+                    activeView === 'league-options'
+                  ) {
+                    setActiveView('league-detail')
+                  } else if (
                     activeView === 'create-league' ||
-                      activeView === 'join-league' ||
-                      activeView === 'league-detail'
-                      ? 'leagues'
-                      : 'home'
-                  )
-                }
+                    activeView === 'join-league'
+                  ) {
+                    setActiveView('leagues')
+                  } else {
+                    setActiveView('home')
+                  }
+                }}
                 aria-label="Go Back"
                 className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <h1 className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase truncate max-w-[70%]">
-                {activeView === 'create-league' && 'CREATE LEAGUE +'}
-                {activeView === 'join-league' && 'JOIN LEAGUE'}
-                {activeView === 'league-detail' && (selectedLeague?.name || 'LEAGUE')}
-                {activeView === 'history' && 'RACE HISTORY'}
-                {activeView === 'notifications' && 'NOTIFICATIONS'}
-              </h1>
+              <div className="flex flex-col items-center justify-center text-center max-w-[70%]">
+                <h1 className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase truncate w-full">
+                  {activeView === 'create-league' && 'CREATE LEAGUE +'}
+                  {activeView === 'join-league' && 'JOIN LEAGUE'}
+                  {activeView === 'league-standing' && 'STANDING'}
+                  {activeView === 'league-races' && 'RACES'}
+                  {activeView === 'league-hall-of-fame' && 'HISTORY (HALL OF FAME)'}
+                  {activeView === 'league-options' && 'LEAGUE SETTINGS'}
+                  {activeView === 'history' && 'RACE HISTORY'}
+                  {activeView === 'notifications' && 'NOTIFICATIONS'}
+                </h1>
+                {(activeView === 'league-standing' ||
+                  activeView === 'league-races' ||
+                  activeView === 'league-hall-of-fame' ||
+                  activeView === 'league-options') && (
+                  <span className="text-[#32cd32] font-extrabold text-[10px] sm:text-xs tracking-wider uppercase leading-none mt-0.5">
+                    {selectedLeague.name}
+                  </span>
+                )}
+              </div>
             </header>
 
             <div className="flex-1 bg-[#222222] rounded-[36px] p-6 flex flex-col items-center justify-center text-center shadow-lg">
               <p className="text-[#32cd32] font-extrabold text-lg uppercase mb-2">
                 {activeView === 'create-league' && 'Create League Screen'}
                 {activeView === 'join-league' && 'Join League Screen'}
-                {activeView === 'league-detail' && `${selectedLeague?.name} Hub`}
+                {activeView === 'league-standing' && `${selectedLeague.name} — Standings`}
+                {activeView === 'league-races' && `${selectedLeague.name} — Races & Schedules`}
+                {activeView === 'league-hall-of-fame' && `${selectedLeague.name} — Hall of Fame`}
+                {activeView === 'league-options' && `${selectedLeague.name} — Options`}
                 {activeView === 'history' && 'Race History View'}
                 {activeView === 'notifications' && 'Notifications Center'}
               </p>
@@ -280,22 +381,33 @@ export function App() {
               </p>
               <button
                 type="button"
-                onClick={() =>
-                  setActiveView(
+                onClick={() => {
+                  if (
+                    activeView === 'league-standing' ||
+                    activeView === 'league-races' ||
+                    activeView === 'league-hall-of-fame' ||
+                    activeView === 'league-options'
+                  ) {
+                    setActiveView('league-detail')
+                  } else if (
                     activeView === 'create-league' ||
-                      activeView === 'join-league' ||
-                      activeView === 'league-detail'
-                      ? 'leagues'
-                      : 'home'
-                  )
-                }
+                    activeView === 'join-league'
+                  ) {
+                    setActiveView('leagues')
+                  } else {
+                    setActiveView('home')
+                  }
+                }}
                 className="px-6 py-2.5 rounded-full bg-[#32cd32] text-black font-extrabold text-sm hover:bg-[#28b428] transition cursor-pointer"
               >
-                {activeView === 'create-league' ||
-                activeView === 'join-league' ||
-                activeView === 'league-detail'
-                  ? 'Back to My Leagues'
-                  : 'Back to Homescreen'}
+                {activeView === 'league-standing' ||
+                activeView === 'league-races' ||
+                activeView === 'league-hall-of-fame' ||
+                activeView === 'league-options'
+                  ? `Back to ${selectedLeague.name}`
+                  : activeView === 'create-league' || activeView === 'join-league'
+                    ? 'Back to My Leagues'
+                    : 'Back to Homescreen'}
               </button>
             </div>
           </div>
