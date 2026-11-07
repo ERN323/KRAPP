@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <rect width="120" height="120" rx="28" fill="#222222"/>
+  <circle cx="60" cy="60" r="46" stroke="#32cd32" stroke-width="5"/>
+  <!-- Racing Helmet Silhouette -->
+  <path d="M35 66C35 46 47 34 64 34C79 34 88 45 88 60V72C88 77 83 82 77 82H46C39 82 35 75 35 66Z" fill="#32cd32"/>
+  <path d="M56 50H87V63H56L48 56.5L56 50Z" fill="#222222"/>
+  <path d="M40 73H84" stroke="#222222" stroke-width="4" stroke-linecap="round"/>
+</svg>
