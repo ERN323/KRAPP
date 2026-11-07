@@ -16,6 +16,27 @@ const DEFAULT_PROFILE: DriverProfile = {
   customAvatarDataUrl: null,
 }
 
+export interface LeagueItem {
+  id: string
+  name: string
+}
+
+const DEFAULT_LEAGUES: LeagueItem[] = [
+  { id: 'gazeju-kauss', name: 'GĀZĒJU KAUSS' },
+  { id: 'leisu-cup', name: 'LEISU CUP' },
+  { id: 'kurzemes-rally', name: 'KURZEMES RALLY' },
+  { id: 'euro-cup', name: 'EURO CUP' },
+]
+
+export type AppView =
+  | 'home'
+  | 'history'
+  | 'leagues'
+  | 'create-league'
+  | 'join-league'
+  | 'league-detail'
+  | 'notifications'
+
 export function App() {
   const [profile, setProfile] = useState<DriverProfile>(() => {
     try {
@@ -27,7 +48,8 @@ export function App() {
   })
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
-  const [activeView, setActiveView] = useState<'home' | 'history' | 'leagues' | 'notifications'>('home')
+  const [activeView, setActiveView] = useState<AppView>('home')
+  const [selectedLeague, setSelectedLeague] = useState<LeagueItem | null>(null)
 
   useEffect(() => {
     try {
@@ -44,18 +66,23 @@ export function App() {
     profile.avatarType !== 'none' ||
     Boolean(profile.name || profile.surname || profile.weightKg || profile.bio)
 
+  const handleOpenLeague = (league: LeagueItem) => {
+    setSelectedLeague(league)
+    setActiveView('league-detail')
+  }
+
   return (
     <div className="min-h-screen w-full bg-[#3a3a3a] text-white flex justify-center">
-      {/* Mobile-first container matching the Homescreen wireframe */}
+      {/* Mobile-first container matching the KRAPP wireframes */}
       <main className="w-full max-w-md min-h-screen flex flex-col justify-between px-5 py-6 select-none">
-        {activeView === 'home' ? (
+        {activeView === 'home' && (
           <>
             {/* 1. TOP PILL BAR: @USERNAME + NOTIFICATION BELL */}
             <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg">
               <button
                 type="button"
                 onClick={() => setIsProfileModalOpen(true)}
-                className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide truncate max-w-[68%] hover:opacity-90 transition"
+                className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide truncate max-w-[68%] hover:opacity-90 transition cursor-pointer"
                 title="Tap to edit @username"
               >
                 @{profile.username}
@@ -65,7 +92,7 @@ export function App() {
                 type="button"
                 onClick={() => setActiveView('notifications')}
                 aria-label="Notifications"
-                className="absolute right-4 w-12 h-12 rounded-full bg-[#3a3a3a] flex items-center justify-center hover:bg-[#484848] active:scale-95 transition"
+                className="absolute right-4 w-12 h-12 rounded-full bg-[#3a3a3a] flex items-center justify-center hover:bg-[#484848] active:scale-95 transition cursor-pointer"
               >
                 <Bell className="w-6 h-6 text-[#32cd32]" strokeWidth={2} />
               </button>
@@ -109,7 +136,6 @@ export function App() {
                   </div>
                 )}
 
-                {/* Subtle hover/tap overlay when an avatar is already chosen */}
                 {hasConfiguredProfile && (
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <span className="text-xs font-extrabold uppercase tracking-wider bg-[#222222] text-[#32cd32] px-3 py-1.5 rounded-full border border-[#32cd32]/40">
@@ -119,7 +145,6 @@ export function App() {
                 )}
               </button>
 
-              {/* Optional Driver Bio / Info pill below the circle when filled out */}
               {hasConfiguredProfile && profile.bio && (
                 <p className="mt-3 text-xs text-neutral-300 text-center max-w-xs italic line-clamp-2">
                   "{profile.bio}"
@@ -150,39 +175,127 @@ export function App() {
               </button>
             </nav>
           </>
-        ) : (
-          /* Placeholder sub-views for next step-by-step iterations */
-          <div className="flex flex-col flex-1">
-            <header className="w-full bg-[#222222] rounded-full h-16 px-4 flex items-center gap-3 shadow-lg mb-6">
+        )}
+
+        {activeView === 'leagues' && (
+          <div className="flex flex-col flex-1 w-full">
+            {/* TOP PILL HEADER: My LEAGUES */}
+            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-5">
               <button
                 type="button"
                 onClick={() => setActiveView('home')}
-                className="w-10 h-10 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] transition"
+                aria-label="Back to Home"
+                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <h1 className="text-[#32cd32] font-extrabold text-lg tracking-wider uppercase">
+              <h1 className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide">
+                My LEAGUES
+              </h1>
+            </header>
+
+            {/* ACTION PILL BUTTONS: CREATE LEAGUE + & JOIN LEAGUE */}
+            <div className="flex flex-col items-center gap-3.5 px-4 mb-6">
+              <button
+                type="button"
+                onClick={() => setActiveView('create-league')}
+                className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.98] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+              >
+                <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                  CREATE LEAGUE +
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('join-league')}
+                className="w-full bg-[#222222] hover:bg-[#282828] active:scale-[0.98] transition-all rounded-full h-12 px-6 flex items-center justify-center shadow-md cursor-pointer"
+              >
+                <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase">
+                  JOIN LEAGUE
+                </span>
+              </button>
+            </div>
+
+            {/* 2x2 GRID OF LEAGUES */}
+            <section className="grid grid-cols-2 gap-4 flex-1">
+              {DEFAULT_LEAGUES.map((league) => (
+                <button
+                  key={league.id}
+                  type="button"
+                  onClick={() => handleOpenLeague(league)}
+                  className="bg-[#222222] hover:bg-[#272727] active:scale-[0.98] transition-all rounded-[36px] min-h-[210px] sm:min-h-[240px] p-4 flex items-center justify-center shadow-lg cursor-pointer"
+                >
+                  <span className="text-[#32cd32] font-extrabold text-base sm:text-lg tracking-wide uppercase text-center leading-snug">
+                    {league.name}
+                  </span>
+                </button>
+              ))}
+            </section>
+          </div>
+        )}
+
+        {(activeView === 'create-league' ||
+          activeView === 'join-league' ||
+          activeView === 'league-detail' ||
+          activeView === 'history' ||
+          activeView === 'notifications') && (
+          <div className="flex flex-col flex-1 w-full">
+            <header className="relative w-full bg-[#222222] rounded-full h-20 px-6 flex items-center justify-center shadow-lg mb-6">
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveView(
+                    activeView === 'create-league' ||
+                      activeView === 'join-league' ||
+                      activeView === 'league-detail'
+                      ? 'leagues'
+                      : 'home'
+                  )
+                }
+                aria-label="Go Back"
+                className="absolute left-4 w-11 h-11 rounded-full bg-[#3a3a3a] flex items-center justify-center text-[#32cd32] hover:bg-[#484848] active:scale-95 transition cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <h1 className="text-[#32cd32] font-extrabold text-lg sm:text-xl tracking-wide uppercase truncate max-w-[70%]">
+                {activeView === 'create-league' && 'CREATE LEAGUE +'}
+                {activeView === 'join-league' && 'JOIN LEAGUE'}
+                {activeView === 'league-detail' && (selectedLeague?.name || 'LEAGUE')}
                 {activeView === 'history' && 'RACE HISTORY'}
-                {activeView === 'leagues' && 'MY LEAGUES'}
                 {activeView === 'notifications' && 'NOTIFICATIONS'}
               </h1>
             </header>
 
-            <div className="flex-1 bg-[#222222] rounded-[36px] p-6 flex flex-col items-center justify-center text-center">
+            <div className="flex-1 bg-[#222222] rounded-[36px] p-6 flex flex-col items-center justify-center text-center shadow-lg">
               <p className="text-[#32cd32] font-extrabold text-lg uppercase mb-2">
+                {activeView === 'create-league' && 'Create League Screen'}
+                {activeView === 'join-league' && 'Join League Screen'}
+                {activeView === 'league-detail' && `${selectedLeague?.name} Hub`}
                 {activeView === 'history' && 'Race History View'}
-                {activeView === 'leagues' && 'My Leagues & CSV Results'}
                 {activeView === 'notifications' && 'Notifications Center'}
               </p>
               <p className="text-sm text-neutral-400 max-w-xs mb-6">
-                Ready for our next step! Tell us how you want this screen to look and work.
+                Ready for your next mockup & instructions!
               </p>
               <button
                 type="button"
-                onClick={() => setActiveView('home')}
-                className="px-6 py-2.5 rounded-full bg-[#32cd32] text-black font-extrabold text-sm hover:bg-[#28b428] transition"
+                onClick={() =>
+                  setActiveView(
+                    activeView === 'create-league' ||
+                      activeView === 'join-league' ||
+                      activeView === 'league-detail'
+                      ? 'leagues'
+                      : 'home'
+                  )
+                }
+                className="px-6 py-2.5 rounded-full bg-[#32cd32] text-black font-extrabold text-sm hover:bg-[#28b428] transition cursor-pointer"
               >
-                Back to Homescreen
+                {activeView === 'create-league' ||
+                activeView === 'join-league' ||
+                activeView === 'league-detail'
+                  ? 'Back to My Leagues'
+                  : 'Back to Homescreen'}
               </button>
             </div>
           </div>
