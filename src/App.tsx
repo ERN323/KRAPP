@@ -24,6 +24,10 @@ import {
   Shield,
   Pencil,
   UserMinus,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  MapPin,
 } from 'lucide-react'
 import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
@@ -59,6 +63,8 @@ import {
   toggleDriverTagInSupabase,
   fetchLeagueEventsInSupabase,
   assignDriverPenaltyInSupabase,
+  scheduleLeagueRaceInSupabase,
+  setRaceRsvpInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -97,12 +103,14 @@ export type AppView =
   | 'league-detail'
   | 'league-standing'
   | 'league-races'
+  | 'league-race-detail'
   | 'league-hall-of-fame'
   | 'league-options'
   | 'my-team'
   | 'my-team-manage-racers'
   | 'assign-roles'
   | 'manage-racers'
+  | 'schedule-race'
   | 'create-team'
   | 'create-team-manage-racers'
   | 'league-setting-action'
@@ -195,6 +203,28 @@ export function App() {
   const [manageRacerActionLoading, setManageRacerActionLoading] = useState(false)
   const [manageRacerSuccessMsg, setManageRacerSuccessMsg] = useState('')
   const [manageRacerErrorMsg, setManageRacerErrorMsg] = useState('')
+
+  // Schedule Race & League Races State
+  const [scheduleCalendarYear, setScheduleCalendarYear] = useState(() =>
+    new Date().getFullYear()
+  )
+  const [scheduleCalendarMonth, setScheduleCalendarMonth] = useState(() =>
+    new Date().getMonth()
+  )
+  const [scheduleRaceDate, setScheduleRaceDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  )
+  const [scheduleRaceTime, setScheduleRaceTime] = useState('19:00')
+  const [scheduleRaceLocation, setScheduleRaceLocation] = useState('')
+  const [scheduleRaceTitle, setScheduleRaceTitle] = useState('')
+  const [isSchedulingRace, setIsSchedulingRace] = useState(false)
+  const [scheduleRaceError, setScheduleRaceError] = useState('')
+  const [racesYearFilter, setRacesYearFilter] = useState<string>('ALL')
+  const [loadingRaces, setLoadingRaces] = useState(false)
+  const [selectedRaceForDetail, setSelectedRaceForDetail] =
+    useState<LeagueRaceEvent | null>(null)
+  const [isChangingRaceRsvp, setIsChangingRaceRsvp] = useState(false)
+  const [savingRaceRsvp, setSavingRaceRsvp] = useState(false)
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -957,8 +987,97 @@ export function App() {
     }
   }
 
+  const handleOpenScheduleRace = () => {
+    if (!selectedLeague) return
+    const now = new Date()
+    const yyyy = now.getFullYear()
+    const mm = now.getMonth()
+    const dd = String(now.getDate()).padStart(2, '0')
+    setScheduleCalendarYear(yyyy)
+    setScheduleCalendarMonth(mm)
+    setScheduleRaceDate(`${yyyy}-${String(mm + 1).padStart(2, '0')}-${dd}`)
+    setScheduleRaceTime('19:00')
+    setScheduleRaceLocation('')
+    setScheduleRaceTitle('')
+    setScheduleRaceError('')
+    setActiveView('schedule-race')
+  }
+
+  const handleConfirmScheduleRace = async () => {
+    if (!selectedLeague) return
+    const cleanTitle = scheduleRaceTitle.trim() || scheduleRaceLocation.trim()
+    const cleanLocation = scheduleRaceLocation.trim() || cleanTitle
+    if (!cleanTitle) {
+      setScheduleRaceError('Please enter a race title or location')
+      return
+    }
+    if (!scheduleRaceDate) {
+      setScheduleRaceError('Please select a date on the calendar')
+      return
+    }
+
+    setIsSchedulingRace(true)
+    setScheduleRaceError('')
+    try {
+      await scheduleLeagueRaceInSupabase({
+        leagueId: selectedLeague.id,
+        name: cleanTitle,
+        location: cleanLocation,
+        eventDate: scheduleRaceDate,
+        eventTime: scheduleRaceTime.trim() || '19:00',
+      })
+      const refreshedEvents = await fetchLeagueEventsInSupabase(
+        selectedLeague.id
+      )
+      setLeagueRaceEvents(refreshedEvents)
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+      setRacesYearFilter('ALL')
+      setActiveView('league-races')
+    } catch (err: unknown) {
+      setScheduleRaceError(
+        err instanceof Error ? err.message : 'Failed to schedule race'
+      )
+    } finally {
+      setIsSchedulingRace(false)
+    }
+  }
+
+  const handleOpenLeagueRaces = async () => {
+    if (!selectedLeague) return
+    setActiveView('league-races')
+    setLoadingRaces(true)
+    const events = await fetchLeagueEventsInSupabase(selectedLeague.id)
+    setLeagueRaceEvents(events)
+    setLoadingRaces(false)
+  }
+
+  const handleSetRaceRsvp = async (status: 'PARTICIPATE' | 'PASS') => {
+    if (!selectedLeague || !selectedRaceForDetail) return
+    setSavingRaceRsvp(true)
+    try {
+      await setRaceRsvpInSupabase(selectedRaceForDetail.id, status)
+      const updatedRace: LeagueRaceEvent = {
+        ...selectedRaceForDetail,
+        myRsvp: status,
+      }
+      setSelectedRaceForDetail(updatedRace)
+      setLeagueRaceEvents((prev) =>
+        prev.map((ev) => (ev.id === updatedRace.id ? updatedRace : ev))
+      )
+      setIsChangingRaceRsvp(false)
+    } catch (err: unknown) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : 'Failed to save your participation status'
+      )
+    } finally {
+      setSavingRaceRsvp(false)
+    }
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
-    if (actionTitle === 'MY TEAM') {
+    if (actionTitle === 'TEAMS' || actionTitle === 'MY TEAM') {
       handleOpenMyTeam()
       return
     }
@@ -968,6 +1087,10 @@ export function App() {
     }
     if (actionTitle === 'MANAGE RACERS') {
       handleOpenManageRacers()
+      return
+    }
+    if (actionTitle === 'SCHEDULE RACE') {
+      handleOpenScheduleRace()
       return
     }
     if (actionTitle === 'CREATE TEAM') {
@@ -1676,7 +1799,7 @@ export function App() {
 
               <button
                 type="button"
-                onClick={() => setActiveView('league-races')}
+                onClick={handleOpenLeagueRaces}
                 className="w-full flex-1 bg-[#1C2228] hover:bg-[#222930] border border-[#2A323B] hover:border-[#38BDF8]/60 active:scale-[0.99] transition-all rounded-2xl p-5 flex items-center justify-between text-left shadow-lg cursor-pointer"
               >
                 <div>
@@ -1731,7 +1854,7 @@ export function App() {
             />
 
             <div className="flex flex-col gap-4 px-5 flex-1 justify-start">
-              {/* 0. MY TEAM BUTTON — Located just above all settings of the league, visible to everyone */}
+              {/* 0. TEAMS BUTTON — Located just above all settings of the league, visible to everyone */}
               <button
                 type="button"
                 onClick={handleOpenMyTeam}
@@ -1739,7 +1862,7 @@ export function App() {
               >
                 <Shield className="w-4 h-4 text-[#FF6B00]" />
                 <span className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase">
-                  MY TEAM
+                  TEAMS
                 </span>
               </button>
 
@@ -1900,12 +2023,12 @@ export function App() {
           </div>
         )}
 
-        {/* ================= 7B. MY TEAM SCREEN (Inspect & Edit Team) ================= */}
+        {/* ================= 7B. TEAMS SCREEN (Inspect & Edit Team) ================= */}
         {activeView === 'my-team' && selectedLeague && (
           <div className="flex flex-col flex-1 w-full">
             <TrackDayHeader
               sectionTitle={selectedLeague.name}
-              sectionSubtitle="MY TEAM"
+              sectionSubtitle="TEAMS"
               onBack={() => {
                 setIsEditingMyTeam(false)
                 setActiveView('league-options')
@@ -3587,6 +3710,581 @@ export function App() {
           </div>
         )}
 
+        {/* ================= 10B. SCHEDULE RACE SCREEN (Admin Only) ================= */}
+        {activeView === 'schedule-race' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="SETTINGS"
+              onBack={() => setActiveView('league-options')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-between gap-3.5 shadow-2xl">
+              <div className="flex flex-col gap-3">
+                <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center">
+                  SCHEDULE RACE
+                </h2>
+
+                {/* 1. DATE CALENDAR CARD */}
+                <div className="w-full bg-[#14191E] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col items-center shadow-inner">
+                  <span className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase mb-2">
+                    DATE
+                  </span>
+
+                  {/* Calendar Month / Year Header */}
+                  {(() => {
+                    const monthNames = [
+                      'JANUARY',
+                      'FEBRUARY',
+                      'MARCH',
+                      'APRIL',
+                      'MAY',
+                      'JUNE',
+                      'JULY',
+                      'AUGUST',
+                      'SEPTEMBER',
+                      'OCTOBER',
+                      'NOVEMBER',
+                      'DECEMBER',
+                    ]
+                    const daysInMonth = new Date(
+                      scheduleCalendarYear,
+                      scheduleCalendarMonth + 1,
+                      0
+                    ).getDate()
+                    const dayNumbers = Array.from(
+                      { length: daysInMonth },
+                      (_, i) => i + 1
+                    )
+                    const trailingEmptyCells =
+                      (7 - (daysInMonth % 7)) % 7
+
+                    const handlePrevMonth = () => {
+                      if (scheduleCalendarMonth === 0) {
+                        setScheduleCalendarMonth(11)
+                        setScheduleCalendarYear((y) => y - 1)
+                      } else {
+                        setScheduleCalendarMonth((m) => m - 1)
+                      }
+                    }
+
+                    const handleNextMonth = () => {
+                      if (scheduleCalendarMonth === 11) {
+                        setScheduleCalendarMonth(0)
+                        setScheduleCalendarYear((y) => y + 1)
+                      } else {
+                        setScheduleCalendarMonth((m) => m + 1)
+                      }
+                    }
+
+                    const selectCalendarDay = (day: number) => {
+                      const yyyy = scheduleCalendarYear
+                      const mm = String(scheduleCalendarMonth + 1).padStart(
+                        2,
+                        '0'
+                      )
+                      const dd = String(day).padStart(2, '0')
+                      setScheduleRaceDate(`${yyyy}-${mm}-${dd}`)
+                    }
+
+                    return (
+                      <div className="w-full max-w-[270px] border-2 border-[#2A323B] rounded-xl overflow-hidden bg-[#1C2228]">
+                        {/* Top Bar inside Calendar Box */}
+                        <div className="flex items-center justify-between px-2.5 py-2 bg-[#14191E] border-b-2 border-[#2A323B]">
+                          <button
+                            type="button"
+                            onClick={handlePrevMonth}
+                            className="w-6 h-6 rounded-md bg-[#1C2228] hover:bg-[#252D35] flex items-center justify-center text-[#8A99AD] hover:text-white cursor-pointer"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <span className="font-display font-extrabold text-sm tracking-wider text-white uppercase">
+                            {monthNames[scheduleCalendarMonth]}{' '}
+                            {scheduleCalendarYear}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleNextMonth}
+                            className="w-6 h-6 rounded-md bg-[#1C2228] hover:bg-[#252D35] flex items-center justify-center text-[#8A99AD] hover:text-white cursor-pointer"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* 7-Column Day Grid (1..31) matching wireframe */}
+                        <div className="grid grid-cols-7">
+                          {dayNumbers.map((day) => {
+                            const candidateIso = `${scheduleCalendarYear}-${String(
+                              scheduleCalendarMonth + 1
+                            ).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                            const isSelectedDay =
+                              scheduleRaceDate === candidateIso
+
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => selectCalendarDay(day)}
+                                className={`h-8 border border-[#2A323B]/80 font-display font-extrabold text-xs flex items-center justify-center transition cursor-pointer ${
+                                  isSelectedDay
+                                    ? 'bg-[#FF6B00] text-black font-black shadow-inner'
+                                    : 'bg-[#1C2228] text-white hover:bg-[#252D35] hover:text-[#FF6B00]'
+                                }`}
+                              >
+                                {day}
+                              </button>
+                            )
+                          })}
+                          {Array.from({ length: trailingEmptyCells }).map(
+                            (_, idx) => (
+                              <div
+                                key={`empty-${idx}`}
+                                className="h-8 border border-[#2A323B]/60 bg-[#14191E]/60"
+                              />
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {scheduleRaceDate && (
+                    <span className="mt-2 text-[11px] font-bold text-[#8A99AD] uppercase tracking-wider">
+                      Selected:{' '}
+                      <strong className="text-[#FF6B00]">
+                        {scheduleRaceDate.split('-').reverse().join('.')}
+                      </strong>
+                    </span>
+                  )}
+                </div>
+
+                {/* 2. RACE TITLE PILL */}
+                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-12 px-5 flex items-center justify-between gap-2 shadow-inner">
+                  <Flag className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                  <input
+                    type="text"
+                    value={scheduleRaceTitle}
+                    onChange={(e) => setScheduleRaceTitle(e.target.value)}
+                    placeholder="RACE TITLE (E.G. KANDAVA)"
+                    className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                  />
+                </div>
+
+                {/* 3. TIME PILL */}
+                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-12 px-5 flex items-center justify-between gap-2 shadow-inner">
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Clock className="w-4 h-4 text-[#FF6B00]" />
+                    <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                      TIME
+                    </span>
+                  </div>
+                  <input
+                    type="time"
+                    value={scheduleRaceTime}
+                    onChange={(e) => setScheduleRaceTime(e.target.value)}
+                    className="bg-transparent font-display font-extrabold text-base tracking-wider text-white uppercase focus:outline-none text-right cursor-pointer"
+                  />
+                </div>
+
+                {/* 4. LOCATION PILL */}
+                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-12 px-5 flex items-center justify-between gap-2 shadow-inner">
+                  <MapPin className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                  <input
+                    type="text"
+                    value={scheduleRaceLocation}
+                    onChange={(e) => setScheduleRaceLocation(e.target.value)}
+                    placeholder="LOCATION"
+                    className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                  />
+                </div>
+
+                {scheduleRaceError && (
+                  <p className="text-xs font-bold text-red-400 text-center">
+                    {scheduleRaceError}
+                  </p>
+                )}
+              </div>
+
+              {/* 5. BOTTOM CANCEL & CONFIRM CARDS */}
+              <div className="grid grid-cols-2 gap-3.5 w-full pt-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveView('league-options')}
+                  className="bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] hover:border-red-500/50 active:scale-[0.98] transition-all rounded-3xl h-36 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
+                >
+                  <span className="font-display font-extrabold text-2xl tracking-wider text-[#EF4444] uppercase">
+                    CANCEL
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isSchedulingRace}
+                  onClick={handleConfirmScheduleRace}
+                  className="bg-[#14191E] hover:bg-[#192026] border border-[#FF6B00]/60 hover:border-[#FF6B00] active:scale-[0.98] transition-all rounded-3xl h-36 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer disabled:opacity-50"
+                >
+                  <span className="font-display font-extrabold text-2xl tracking-wider text-[#FF6B00] uppercase">
+                    {isSchedulingRace ? 'SAVING...' : 'CONFIRM'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 10C. LEAGUE RACES LIST SCREEN ================= */}
+        {activeView === 'league-races' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            {/* Custom Top Header matching Wireframe: BACK | RACES | YEAR PILL */}
+            <header className="px-5 pt-4 pb-3">
+              <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl px-4 py-3.5 flex items-center justify-between shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => setActiveView('league-detail')}
+                  className="px-4 py-1.5 rounded-full bg-[#252D35] hover:bg-[#2E3842] border border-[#36414D] active:scale-95 transition cursor-pointer"
+                >
+                  <span className="font-display font-extrabold text-xs tracking-wider text-[#EF4444] uppercase">
+                    BACK
+                  </span>
+                </button>
+
+                <div className="text-center">
+                  <h1 className="font-display font-extrabold text-2xl tracking-wider text-[#FF6B00] uppercase leading-none">
+                    RACES
+                  </h1>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#8A99AD] block mt-0.5">
+                    {selectedLeague.name}
+                  </span>
+                </div>
+
+                {/* Year Filter Pill — cycles between available years & ALL */}
+                {(() => {
+                  const yearsSet = new Set<string>(['2026'])
+                  leagueRaceEvents.forEach((ev) => {
+                    if (ev.eventDate && ev.eventDate.length >= 4) {
+                      yearsSet.add(ev.eventDate.slice(0, 4))
+                    }
+                  })
+                  const yearOptions = ['ALL', ...Array.from(yearsSet).sort()]
+                  const nextYearFilter = () => {
+                    const idx = yearOptions.indexOf(racesYearFilter)
+                    const next =
+                      yearOptions[(idx + 1) % yearOptions.length] || 'ALL'
+                    setRacesYearFilter(next)
+                  }
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={nextYearFilter}
+                      title="Tap to filter by year"
+                      className="px-4 py-1.5 rounded-full bg-[#252D35] hover:bg-[#2E3842] border border-[#36414D] active:scale-95 transition cursor-pointer"
+                    >
+                      <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase">
+                        {racesYearFilter === 'ALL' ? '2026' : racesYearFilter}
+                      </span>
+                    </button>
+                  )
+                })()}
+              </div>
+            </header>
+
+            <div className="px-5 flex-1 flex flex-col gap-3.5 overflow-y-auto pb-2">
+              {loadingRaces ? (
+                <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-3xl p-8 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
+                  Loading scheduled races...
+                </div>
+              ) : (
+                (() => {
+                  const filteredRaces =
+                    racesYearFilter === 'ALL'
+                      ? leagueRaceEvents
+                      : leagueRaceEvents.filter((ev) =>
+                          ev.eventDate.startsWith(racesYearFilter)
+                        )
+                  const displayedRaces =
+                    filteredRaces.length > 0 ? filteredRaces : leagueRaceEvents
+
+                  if (displayedRaces.length === 0) {
+                    return (
+                      <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-3xl p-6 flex flex-col items-center justify-center text-center shadow-lg">
+                        <Flag className="w-10 h-10 text-[#FF6B00] mb-3" />
+                        <h2 className="font-display font-extrabold text-xl tracking-wider text-white uppercase mb-1">
+                          NO RACES SCHEDULED YET
+                        </h2>
+                        <p className="text-xs text-[#8A99AD] max-w-xs mb-5">
+                          Once an Admin schedules the next race in League Settings, it will appear right here for everyone to see and confirm participation.
+                        </p>
+                        {isEffectiveAdmin && (
+                          <button
+                            type="button"
+                            onClick={handleOpenScheduleRace}
+                            className="px-6 py-2.5 rounded-full bg-[#FF6B00] hover:bg-[#ff7b1a] text-black font-display font-extrabold text-sm tracking-wider uppercase shadow-lg shadow-[#FF6B00]/20 transition cursor-pointer"
+                          >
+                            SCHEDULE RACE NOW
+                          </button>
+                        )}
+                      </div>
+                    )
+                  }
+
+                  return displayedRaces.map((race) => {
+                    const formattedDate = race.eventDate
+                      ? race.eventDate.split('-').reverse().join('.')
+                      : 'TBA'
+                    const top1 = race.top3Names?.[0] || 'To be known'
+                    const top2 = race.top3Names?.[1] || 'To be known'
+                    const top3 = race.top3Names?.[2] || 'To be known'
+
+                    return (
+                      <div
+                        key={race.id}
+                        className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-3 shadow-lg"
+                      >
+                        {/* Top Inner Pill: Race Title & Date */}
+                        <div className="w-full bg-[#2A323B]/80 border border-[#36414D] rounded-2xl py-2 px-4 flex flex-col items-center justify-center text-center">
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase leading-tight">
+                            {race.name}
+                          </span>
+                          <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] leading-tight">
+                            {formattedDate}
+                            {race.eventTime ? ` · ${race.eventTime}` : ''}
+                          </span>
+                        </div>
+
+                        {/* Bottom Row: Top 3 Racers on Left + SEE MORE Button on Right */}
+                        <div className="flex items-center justify-between px-2 pb-1 gap-3">
+                          <div className="flex flex-col gap-0.5 text-sm font-bold text-white min-w-0">
+                            <span className="truncate">1. {top1}</span>
+                            <span className="truncate">2. {top2}</span>
+                            <span className="truncate">3. {top3}</span>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-1.5 shrink-0">
+                            {race.myRsvp && (
+                              <span
+                                className={`text-[9px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
+                                  race.myRsvp === 'PARTICIPATE'
+                                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] border-[#FF6B00]/40'
+                                    : 'bg-red-500/15 text-red-400 border-red-500/40'
+                                }`}
+                              >
+                                {race.myRsvp === 'PARTICIPATE'
+                                  ? 'GOING'
+                                  : 'PASS'}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRaceForDetail(race)
+                                setIsChangingRaceRsvp(false)
+                                setActiveView('league-race-detail')
+                              }}
+                              className="px-5 py-1.5 rounded-full bg-[#2A323B] hover:bg-[#36414D] border border-[#FF6B00]/50 active:scale-95 transition cursor-pointer"
+                            >
+                              <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase">
+                                SEE MORE
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })
+                })()
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ================= 10D. RACE DETAIL & RSVP SCREEN (SEE MORE) ================= */}
+        {activeView === 'league-race-detail' &&
+          selectedLeague &&
+          selectedRaceForDetail && (
+            <div className="flex flex-col flex-1 w-full">
+              <TrackDayHeader
+                sectionTitle={selectedRaceForDetail.name}
+                sectionSubtitle={selectedLeague.name}
+                onBack={() => setActiveView('league-races')}
+                onBellClick={handleOpenNotifications}
+                unreadNotificationsCount={unreadNotificationsCount}
+              />
+
+              <div className="px-5 flex-1 flex flex-col justify-between gap-3.5">
+                {/* 1. LOCATION & CIRCUIT MAP CARD */}
+                <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-4 flex flex-col items-center text-center shadow-lg">
+                  <span className="font-display font-extrabold text-sm tracking-widest text-[#FF6B00] uppercase leading-tight">
+                    LOCATION
+                  </span>
+                  <h2 className="font-display font-extrabold text-xl tracking-wider text-[#FF6B00] uppercase leading-tight mb-2">
+                    {selectedRaceForDetail.location ||
+                      selectedRaceForDetail.name}
+                  </h2>
+
+                  {/* Illustrated Karting Circuit Map SVG (Matching Kandava Track Loop in Wireframe) */}
+                  <div className="w-full max-w-[250px] h-36 flex items-center justify-center my-1">
+                    <svg
+                      viewBox="0 0 280 160"
+                      className="w-full h-full drop-shadow-xl"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      {/* Outer White Track Kerb Border */}
+                      <path
+                        d="M55 48 C42 25, 95 14, 142 26 C185 37, 205 60, 232 66 C255 71, 258 92, 238 102 C226 108, 246 122, 234 134 C222 146, 202 136, 188 118 C172 98, 138 96, 114 118 C88 142, 54 142, 52 112 C50 92, 66 68, 55 48 Z"
+                        stroke="#F8FAFC"
+                        strokeWidth="18"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {/* Dark Asphalt Track Surface */}
+                      <path
+                        d="M55 48 C42 25, 95 14, 142 26 C185 37, 205 60, 232 66 C255 71, 258 92, 238 102 C226 108, 246 122, 234 134 C222 146, 202 136, 188 118 C172 98, 138 96, 114 118 C88 142, 54 142, 52 112 C50 92, 66 68, 55 48 Z"
+                        stroke="#4B4941"
+                        strokeWidth="14"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {/* Dashed Yellow Center Racing Line */}
+                      <path
+                        d="M55 48 C42 25, 95 14, 142 26 C185 37, 205 60, 232 66 C255 71, 258 92, 238 102 C226 108, 246 122, 234 134 C222 146, 202 136, 188 118 C172 98, 138 96, 114 118 C88 142, 54 142, 52 112 C50 92, 66 68, 55 48 Z"
+                        stroke="#FACC15"
+                        strokeWidth="1.6"
+                        strokeDasharray="4 4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {/* Start/Finish Line Marker */}
+                      <line
+                        x1="138"
+                        y1="95"
+                        x2="142"
+                        y2="111"
+                        stroke="#FF6B00"
+                        strokeWidth="3.5"
+                      />
+                    </svg>
+                  </div>
+
+                  {/* Date & Time Pill Bar */}
+                  <div className="w-full bg-[#2A323B] border border-[#36414D] rounded-full py-1.5 px-4 mt-1 flex items-center justify-center gap-2">
+                    <span className="font-display font-extrabold text-xs tracking-wider text-white">
+                      {selectedRaceForDetail.eventDate
+                        ? selectedRaceForDetail.eventDate
+                            .split('-')
+                            .reverse()
+                            .join('.')
+                        : 'TBA'}
+                      {selectedRaceForDetail.eventTime
+                        ? ` · ${selectedRaceForDetail.eventTime}`
+                        : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. CONDITIONAL BOTTOM SECTION:
+                    - Before choosing participation status (or when changing it): PASS & PARTICIPATE cards
+                    - Once status is chosen (or race is published): TOP 3 card + STANDING card button */}
+                {!selectedRaceForDetail.myRsvp || isChangingRaceRsvp ? (
+                  <div className="flex-1 flex flex-col justify-end gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A99AD] text-center">
+                      Will you participate in this race?
+                    </p>
+                    <div className="grid grid-cols-2 gap-3.5 w-full">
+                      <button
+                        type="button"
+                        disabled={savingRaceRsvp}
+                        onClick={() => handleSetRaceRsvp('PASS')}
+                        className="bg-[#1C2228] hover:bg-[#242C35] border border-[#2A323B] hover:border-red-500/60 active:scale-[0.98] transition-all rounded-3xl h-52 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer disabled:opacity-50"
+                      >
+                        <span className="font-display font-extrabold text-2xl tracking-wider text-[#EF4444] uppercase">
+                          PASS
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={savingRaceRsvp}
+                        onClick={() => handleSetRaceRsvp('PARTICIPATE')}
+                        className="bg-[#1C2228] hover:bg-[#242C35] border border-[#FF6B00]/60 hover:border-[#FF6B00] active:scale-[0.98] transition-all rounded-3xl h-52 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer disabled:opacity-50"
+                      >
+                        <span className="font-display font-extrabold text-2xl tracking-wider text-[#FF6B00] uppercase">
+                          PARTICIPATE
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col justify-between gap-3">
+                    {/* Selected Participation Status Strip with option to change */}
+                    <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full px-4 py-1.5 flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A99AD]">
+                        Your Status:{' '}
+                        <strong
+                          className={
+                            selectedRaceForDetail.myRsvp === 'PARTICIPATE'
+                              ? 'text-[#FF6B00]'
+                              : 'text-red-400'
+                          }
+                        >
+                          {selectedRaceForDetail.myRsvp === 'PARTICIPATE'
+                            ? 'PARTICIPATING'
+                            : 'PASS'}
+                        </strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsChangingRaceRsvp(true)}
+                        className="text-[10px] font-extrabold uppercase tracking-wider text-[#38BDF8] hover:underline cursor-pointer"
+                      >
+                        Change
+                      </button>
+                    </div>
+
+                    {/* TOP 3 CARD */}
+                    <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col items-center gap-2 shadow-lg">
+                      <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                        TOP 3
+                      </span>
+
+                      {[0, 1, 2].map((posIdx) => {
+                        const driverName =
+                          selectedRaceForDetail.top3Names?.[posIdx] ||
+                          'TO BE KNOWN'
+                        return (
+                          <div
+                            key={posIdx}
+                            className="w-full bg-[#2A323B] border border-[#36414D] rounded-full h-8 px-4 flex items-center justify-center"
+                          >
+                            <span className="font-display font-extrabold text-xs tracking-wider text-white uppercase truncate">
+                              {driverName}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* STANDING CARD BUTTON (To be developed later) */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleOpenSettingAction('RACE STANDING')
+                      }
+                      className="w-full bg-[#1C2228] hover:bg-[#242C35] border border-[#2A323B] hover:border-[#FF6B00]/60 active:scale-[0.99] transition-all rounded-3xl h-28 p-4 flex items-center justify-center shadow-lg cursor-pointer"
+                    >
+                      <span className="font-display font-extrabold text-xl tracking-wider text-[#FF6B00] uppercase">
+                        STANDING
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
         {/* ================= 11. NOTIFICATIONS SCREEN (Bell on Homescreen) ================= */}
         {activeView === 'notifications' && (
           <div className="flex flex-col flex-1 w-full">
@@ -3640,7 +4338,6 @@ export function App() {
 
         {/* ================= PLACEHOLDER SUB-VIEWS ================= */}
         {(activeView === 'league-standing' ||
-          activeView === 'league-races' ||
           activeView === 'league-hall-of-fame' ||
           activeView === 'league-setting-action' ||
           activeView === 'history') && (
@@ -3649,13 +4346,11 @@ export function App() {
               sectionTitle={
                 activeView === 'league-standing'
                   ? 'STANDING'
-                  : activeView === 'league-races'
-                    ? 'RACES'
-                    : activeView === 'league-hall-of-fame'
-                      ? 'HALL OF FAME'
-                      : activeView === 'league-setting-action'
-                        ? selectedSettingActionTitle
-                        : 'RACE HISTORY'
+                  : activeView === 'league-hall-of-fame'
+                    ? 'HALL OF FAME'
+                    : activeView === 'league-setting-action'
+                      ? selectedSettingActionTitle
+                      : 'RACE HISTORY'
               }
               sectionSubtitle={selectedLeague?.name}
               onBack={() => {
@@ -3663,7 +4358,6 @@ export function App() {
                   setActiveView('league-options')
                 } else if (
                   activeView === 'league-standing' ||
-                  activeView === 'league-races' ||
                   activeView === 'league-hall-of-fame'
                 ) {
                   setActiveView('league-detail')
@@ -3679,7 +4373,6 @@ export function App() {
               <p className="font-display font-extrabold text-2xl text-white uppercase tracking-wide mb-1">
                 {activeView === 'league-standing' &&
                   `${selectedLeague?.name} — Standings`}
-                {activeView === 'league-races' && `${selectedLeague?.name} — Races`}
                 {activeView === 'league-hall-of-fame' &&
                   `${selectedLeague?.name} — Hall of Fame`}
                 {activeView === 'league-setting-action' && selectedSettingActionTitle}
@@ -3695,7 +4388,6 @@ export function App() {
                     setActiveView('league-options')
                   } else if (
                     activeView === 'league-standing' ||
-                    activeView === 'league-races' ||
                     activeView === 'league-hall-of-fame'
                   ) {
                     setActiveView('league-detail')

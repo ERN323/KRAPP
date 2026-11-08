@@ -45,8 +45,13 @@ export interface LeagueMemberItem {
 export interface LeagueRaceEvent {
   id: string
   name: string
+  location: string
   eventDate: string
+  eventTime: string
   roundNo: number
+  myRsvp: 'PARTICIPATE' | 'PASS' | null
+  participatingCount: number
+  top3Names: string[]
 }
 
 export interface AppNotification {
@@ -593,17 +598,70 @@ export async function fetchLeagueEventsInSupabase(
     return rows.map((r: Record<string, unknown>) => ({
       id: String(r.id),
       name: String(r.name || 'Race'),
+      location: String(r.name || ''),
       eventDate: String(r.event_date || ''),
+      eventTime: '19:00',
       roundNo: Number(r.round_no || 1),
+      myRsvp: null,
+      participatingCount: 0,
+      top3Names: [],
     }))
   }
 
   return data.map((r: Record<string, unknown>) => ({
     id: String(r.id),
     name: String(r.name || 'Race'),
+    location: String(r.location || r.name || ''),
     eventDate: String(r.event_date || ''),
+    eventTime: String(r.event_time || '19:00'),
     roundNo: Number(r.round_no || 1),
+    myRsvp:
+      r.my_rsvp === 'PARTICIPATE' || r.my_rsvp === 'PASS'
+        ? (r.my_rsvp as 'PARTICIPATE' | 'PASS')
+        : null,
+    participatingCount: Number(r.participating_count || 0),
+    top3Names: Array.isArray(r.top3_names)
+      ? r.top3_names.map((n: unknown) => String(n))
+      : [],
   }))
+}
+
+export async function scheduleLeagueRaceInSupabase(input: {
+  leagueId: string
+  name: string
+  eventDate: string
+  eventTime: string
+  location: string
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('fn_schedule_race', {
+    p_league_id: input.leagueId,
+    p_name: input.name.trim().toUpperCase(),
+    p_event_date: input.eventDate,
+    p_event_time: input.eventTime.trim() || '19:00',
+    p_location: input.location.trim().toUpperCase(),
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return String(data)
+}
+
+export async function setRaceRsvpInSupabase(
+  eventId: string,
+  status: 'PARTICIPATE' | 'PASS'
+): Promise<'PARTICIPATE' | 'PASS'> {
+  const { data, error } = await supabase.rpc('fn_set_race_rsvp', {
+    p_event_id: eventId,
+    p_status: status,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return (String(data) as 'PARTICIPATE' | 'PASS') || status
 }
 
 export async function assignDriverPenaltyInSupabase(input: {
