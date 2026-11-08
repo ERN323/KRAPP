@@ -488,3 +488,23 @@ export async function updateLeagueTeamInSupabase(input: {
     throw new Error(error.message)
   }
 }
+
+export async function deleteLeagueTeamInSupabase(
+  teamId: string
+): Promise<void> {
+  const { error } = await supabase.rpc('fn_delete_team', {
+    p_team_id: teamId,
+  })
+
+  if (error) {
+    // Fallback direct delete if RPC migration hasn't been executed yet
+    const { error: directErr } = await supabase
+      .from('teams')
+      .delete()
+      .eq('id', teamId)
+
+    if (directErr) {
+      throw new Error(error.message)
+    }
+  }
+}

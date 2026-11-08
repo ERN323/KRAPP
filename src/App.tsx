@@ -52,6 +52,7 @@ import {
   createLeagueTeamInSupabase,
   fetchLeagueTeamsWithRosters,
   updateLeagueTeamInSupabase,
+  deleteLeagueTeamInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -153,6 +154,9 @@ export function App() {
   const [loadingTeams, setLoadingTeams] = useState(false)
   const [selectedMyTeamId, setSelectedMyTeamId] = useState<string | null>(null)
   const [isEditingMyTeam, setIsEditingMyTeam] = useState(false)
+  const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState<string | null>(
+    null
+  )
   const [myTeamSaveMsg, setMyTeamSaveMsg] = useState('')
 
   // Notifications State
@@ -648,8 +652,38 @@ export function App() {
   const handleSelectTeamToInspect = (team: LeagueTeam) => {
     setSelectedMyTeamId(team.id)
     setIsEditingMyTeam(false)
+    setConfirmDeleteTeamId(null)
     setMyTeamSaveMsg('')
     populateTeamEditFields(team)
+  }
+
+  const handleDeleteTeam = async (teamId: string) => {
+    if (!selectedLeague) return
+    setIsCreatingTeam(true)
+    setTeamCreateError('')
+    setMyTeamSaveMsg('')
+    try {
+      await deleteLeagueTeamInSupabase(teamId)
+      const refreshed = await fetchLeagueTeamsWithRosters(selectedLeague.id)
+      setLeagueTeams(refreshed)
+      setIsEditingMyTeam(false)
+      setConfirmDeleteTeamId(null)
+      const nextTeam = refreshed.find((t) => t.isMyTeam) || refreshed[0] || null
+      if (nextTeam) {
+        setSelectedMyTeamId(nextTeam.id)
+        populateTeamEditFields(nextTeam)
+        setMyTeamSaveMsg('Team deleted.')
+      } else {
+        setSelectedMyTeamId(null)
+      }
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      setTeamCreateError(
+        err instanceof Error ? err.message : 'Failed to delete team'
+      )
+    } finally {
+      setIsCreatingTeam(false)
+    }
   }
 
   const handleKickTeamMemberDirect = async (
@@ -2014,34 +2048,76 @@ export function App() {
                         )}
                       </div>
 
-                      {/* Bottom Action Bar when Editing Team */}
-                      {isEditingMyTeam && (
-                        <div className="grid grid-cols-2 gap-3 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsEditingMyTeam(false)
-                              populateTeamEditFields(activeTeam)
-                            }}
-                            className="bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-red-500/60 active:scale-[0.98] transition-all rounded-2xl h-12 flex items-center justify-center cursor-pointer"
-                          >
-                            <span className="font-display font-extrabold text-base tracking-wider text-[#EF4444] uppercase">
-                              CANCEL
-                            </span>
-                          </button>
+                      {/* Bottom Action Bar: Save/Cancel when editing + Delete Team for Admins & Captains */}
+                      <div className="flex flex-col gap-2.5 pt-2">
+                        {isEditingMyTeam && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditingMyTeam(false)
+                                setConfirmDeleteTeamId(null)
+                                populateTeamEditFields(activeTeam)
+                              }}
+                              className="bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-red-500/60 active:scale-[0.98] transition-all rounded-2xl h-12 flex items-center justify-center cursor-pointer"
+                            >
+                              <span className="font-display font-extrabold text-base tracking-wider text-[#EF4444] uppercase">
+                                CANCEL
+                              </span>
+                            </button>
 
-                          <button
-                            type="button"
-                            disabled={isCreatingTeam}
-                            onClick={handleSaveMyTeamChanges}
-                            className="bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-2xl h-12 flex items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer disabled:opacity-50"
-                          >
-                            <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
-                              {isCreatingTeam ? 'SAVING...' : 'SAVE CHANGES'}
-                            </span>
-                          </button>
-                        </div>
-                      )}
+                            <button
+                              type="button"
+                              disabled={isCreatingTeam}
+                              onClick={handleSaveMyTeamChanges}
+                              className="bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-2xl h-12 flex items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer disabled:opacity-50"
+                            >
+                              <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
+                                {isCreatingTeam ? 'SAVING...' : 'SAVE CHANGES'}
+                              </span>
+                            </button>
+                          </div>
+                        )}
+
+                        {isEffectiveCaptainOrAbove && (
+                          confirmDeleteTeamId === activeTeam.id ? (
+                            <div className="bg-[#14191E] border border-red-500/60 rounded-2xl p-3 flex flex-col gap-2">
+                              <p className="text-xs font-bold text-center text-red-400 uppercase tracking-wider">
+                                Delete team "{activeTeam.name}" permanently?
+                              </p>
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteTeamId(null)}
+                                  className="h-10 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] text-xs font-extrabold uppercase tracking-wider text-white cursor-pointer"
+                                >
+                                  Keep Team
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isCreatingTeam}
+                                  onClick={() => handleDeleteTeam(activeTeam.id)}
+                                  className="h-10 rounded-full bg-[#dc2626] hover:bg-[#b91c1c] text-xs font-extrabold uppercase tracking-wider text-white flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {isCreatingTeam ? 'Deleting...' : 'Confirm Delete'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteTeamId(activeTeam.id)}
+                              className="w-full bg-[#dc2626] hover:bg-[#b91c1c] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4 text-white" />
+                              <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
+                                DELETE TEAM
+                              </span>
+                            </button>
+                          )
+                        )}
+                      </div>
                     </>
                   )
                 })()
