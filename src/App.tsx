@@ -205,9 +205,59 @@ export function App() {
       fullName: meta.full_name || meta.name,
       email: session.user.email,
       avatarUrl: meta.avatar_url || meta.picture,
-    }).then((dbProfile) => {
-      if (dbProfile) {
+    }).then(async (dbProfile) => {
+      if (!dbProfile) return
+
+      // Check if localStorage still has previously entered profile details that weren't synced to DB yet
+      let localSaved: Partial<DriverProfile> = {}
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY)
+        if (raw) localSaved = JSON.parse(raw)
+      } catch {
+        // ignore
+      }
+
+      const dbIsBlank =
+        !dbProfile.name &&
+        !dbProfile.surname &&
+        !dbProfile.driverNumber &&
+        !dbProfile.weightKg
+      const localHasData = Boolean(
+        localSaved.name ||
+          localSaved.surname ||
+          localSaved.driverNumber ||
+          localSaved.weightKg
+      )
+
+      if (dbIsBlank && localHasData) {
+        const merged: DriverProfile = {
+          username:
+            localSaved.username && localSaved.username !== 'USERNAME'
+              ? localSaved.username
+              : dbProfile.username,
+          name: localSaved.name || dbProfile.name,
+          surname: localSaved.surname || dbProfile.surname,
+          driverNumber: localSaved.driverNumber || dbProfile.driverNumber || '',
+          weightKg: localSaved.weightKg || dbProfile.weightKg,
+          bio: localSaved.bio || dbProfile.bio,
+          avatarType:
+            localSaved.avatarType && localSaved.avatarType !== 'none'
+              ? localSaved.avatarType
+              : dbProfile.avatarType,
+          helmetId: localSaved.helmetId || dbProfile.helmetId || 'track-orange',
+          customAvatarDataUrl:
+            localSaved.customAvatarDataUrl || dbProfile.customAvatarDataUrl,
+        }
+        setProfile(merged)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+        await saveDriverProfileToSupabase(merged)
+      } else {
         setProfile(dbProfile)
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(dbProfile))
+        } catch {
+          // ignore
+        }
       }
     })
 
@@ -242,7 +292,15 @@ export function App() {
     } catch (e) {
       console.error('Failed to save profile to localStorage', e)
     }
-    await saveDriverProfileToSupabase(updated)
+    const savedFromDb = await saveDriverProfileToSupabase(updated)
+    if (savedFromDb) {
+      setProfile(savedFromDb)
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(savedFromDb))
+      } catch {
+        // ignore
+      }
+    }
   }
 
   if (authLoading) {

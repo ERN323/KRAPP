@@ -1,18 +1,10 @@
 import React, { useState } from 'react'
-import { Mail, Lock, User, AlertCircle } from 'lucide-react'
-import {
-  signInWithGoogle,
-  signInWithEmail,
-  signUpWithEmail,
-} from '../lib/leaguesRepo'
+import { AlertCircle } from 'lucide-react'
+import { KrappLogoHelmet } from './HelmetIcons'
+import { signInWithGoogle } from '../lib/leaguesRepo'
 
 export const AuthScreen: React.FC = () => {
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [displayName, setDisplayName] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
-  const [infoMsg, setInfoMsg] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleGoogleLogin = async () => {
@@ -24,39 +16,6 @@ export const AuthScreen: React.FC = () => {
       setErrorMsg(
         err instanceof Error ? err.message : 'Failed to start Google Sign-In'
       )
-      setLoading(false)
-    }
-  }
-
-  const handleEmailSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setErrorMsg('')
-    setInfoMsg('')
-
-    if (!email.trim() || !password.trim()) {
-      setErrorMsg('Please enter both email and password')
-      return
-    }
-
-    setLoading(true)
-    try {
-      if (mode === 'signin') {
-        await signInWithEmail(email.trim(), password)
-      } else {
-        const res = await signUpWithEmail(
-          email.trim(),
-          password,
-          displayName.trim() || email.split('@')[0]
-        )
-        if (res.user && !res.session) {
-          setInfoMsg(
-            'Account created! Check your email inbox to confirm, or sign in if confirmation is disabled.'
-          )
-        }
-      }
-    } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Authentication failed')
-    } finally {
       setLoading(false)
     }
   }
@@ -85,16 +44,27 @@ export const AuthScreen: React.FC = () => {
           </span>
         </div>
 
-        {/* Auth Card */}
-        <div className="my-auto bg-[#1C2228] border border-[#2A323B] rounded-2xl p-6 shadow-xl">
-          <h1 className="font-display font-extrabold text-2xl tracking-wide text-white uppercase text-center mb-1">
-            DRIVER <span className="text-[#FF6B00]">PADDOCK LOGIN</span>
+        {/* "You Are Not Logged In" Window */}
+        <div className="my-auto bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-7 shadow-2xl flex flex-col items-center text-center">
+          <div className="w-20 h-20 rounded-full bg-[#14191E] border-2 border-[#FF6B00] flex items-center justify-center mb-4 shadow-lg shadow-[#FF6B00]/15">
+            <KrappLogoHelmet className="w-14 h-14" />
+          </div>
+
+          <h1 className="font-display font-extrabold text-2xl sm:text-3xl tracking-wider text-white uppercase mb-2">
+            YOU ARE NOT <span className="text-[#FF6B00]">LOGGED IN</span>
           </h1>
-          <p className="text-xs text-[#8A99AD] text-center mb-6">
-            Sign in so your leagues, roles & race results sync across all your devices
+          <p className="text-xs text-[#8A99AD] max-w-xs mb-6 leading-relaxed">
+            Sign in with your Google account to load your saved driver profile, number, weight, teams, and leagues across all devices.
           </p>
 
-          {/* Primary Google Sign-In Button */}
+          {errorMsg && (
+            <div className="w-full flex items-center gap-2 text-xs text-red-400 bg-red-950/40 border border-red-800/50 rounded-xl p-3 mb-4 text-left">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Google Sign-In Button */}
           <button
             type="button"
             onClick={handleGoogleLogin}
@@ -120,100 +90,9 @@ export const AuthScreen: React.FC = () => {
               />
             </svg>
             <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
-              CONTINUE WITH GOOGLE
+              {loading ? 'CONNECTING TO GOOGLE...' : 'SIGN IN WITH GOOGLE'}
             </span>
           </button>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-5">
-            <div className="h-px bg-[#2A323B] flex-1" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#8A99AD]">
-              OR USE EMAIL
-            </span>
-            <div className="h-px bg-[#2A323B] flex-1" />
-          </div>
-
-          {/* Email / Password Form */}
-          <form onSubmit={handleEmailSubmit} className="space-y-3.5">
-            {mode === 'signup' && (
-              <div className="relative">
-                <User className="w-4 h-4 text-[#FF6B00] absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Driver Name (e.g. Ernests)"
-                  className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FF6B00]"
-                />
-              </div>
-            )}
-
-            <div className="relative">
-              <Mail className="w-4 h-4 text-[#8A99AD] absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email address"
-                className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FF6B00]"
-              />
-            </div>
-
-            <div className="relative">
-              <Lock className="w-4 h-4 text-[#8A99AD] absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#FF6B00]"
-              />
-            </div>
-
-            {errorMsg && (
-              <div className="flex items-center gap-2 text-xs text-red-400 bg-red-950/40 border border-red-800/50 rounded-xl p-2.5">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            {infoMsg && (
-              <div className="text-xs text-[#38BDF8] bg-[#38BDF8]/10 border border-[#38BDF8]/30 rounded-xl p-2.5">
-                {infoMsg}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer disabled:opacity-50"
-            >
-              <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
-                {loading
-                  ? 'PLEASE WAIT...'
-                  : mode === 'signin'
-                    ? 'SIGN IN WITH EMAIL'
-                    : 'CREATE DRIVER ACCOUNT'}
-              </span>
-            </button>
-          </form>
-
-          {/* Toggle Sign-In / Sign-Up */}
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setMode(mode === 'signin' ? 'signup' : 'signin')
-                setErrorMsg('')
-                setInfoMsg('')
-              }}
-              className="text-xs text-[#8A99AD] hover:text-white underline cursor-pointer"
-            >
-              {mode === 'signin'
-                ? "Don't have an account yet? Create one"
-                : 'Already have an account? Sign in'}
-            </button>
-          </div>
         </div>
 
         {/* Footer */}

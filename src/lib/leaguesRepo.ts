@@ -112,25 +112,10 @@ export async function signOutUser() {
   await supabase.auth.signOut()
 }
 
-export async function ensureAndLoadDriverProfile(userMeta?: {
-  fullName?: string
-  email?: string
-  avatarUrl?: string
-}): Promise<DriverProfile | null> {
-  const preferredName =
-    userMeta?.fullName ||
-    (userMeta?.email ? userMeta.email.split('@')[0] : 'DRIVER')
-
-  const { data, error } = await supabase.rpc('fn_ensure_current_driver', {
-    p_display_name: preferredName,
-    p_preferred_handle: preferredName,
-  })
-
-  if (error || !data) {
-    console.warn('Could not load driver profile from RPC:', error?.message)
-    return null
-  }
-
+function mapDriverRowToProfile(
+  data: Record<string, unknown>,
+  fallbackAvatarUrl?: string
+): DriverProfile {
   const cleanUsername = String(data.handle || '@USERNAME')
     .replace(/^@+/, '')
     .toUpperCase()
@@ -144,23 +129,85 @@ export async function ensureAndLoadDriverProfile(userMeta?: {
     bio: String(data.bio || ''),
     avatarType:
       data.avatar_type === 'custom' || data.avatar_type === 'helmet'
-        ? data.avatar_type
-        : userMeta?.avatarUrl
+        ? (data.avatar_type as 'custom' | 'helmet')
+        : fallbackAvatarUrl
           ? 'custom'
           : 'helmet',
-    helmetId: String(data.helmet_id || 'neon-viper'),
-    customAvatarDataUrl: data.avatar_url || userMeta?.avatarUrl || null,
+    helmetId: String(data.helmet_id || 'track-orange'),
+    customAvatarDataUrl:
+      (data.avatar_url as string | null) || fallbackAvatarUrl || null,
   }
+}
+
+export async function ensureAndLoadDriverProfile(userMeta?: {
+  fullName?: string
+  email?: string
+  avatarUrl?: string
+}): Promise<DriverProfile | null> {
+  const preferredName =
+    userMeta?.fullName ||
+    (userMeta?.email ? userMeta.email.split('@')[0] : 'DRIVER')
+
+  // Try the 4-argument RPC first
+  let { data, error } = await supabase.rpc('fn_ensure_current_driver', {
+    p_display_name: preferredName,
+    p_preferred_handle: preferredName,
+    p_email: userMeta?.email || null,
+    p_avatar_url: userMeta?.avatarUrl || null,
+  })
+
+  // Fallback to 2-argument RPC if migration hasn't been executed yet
+  if (error) {
+    const fallbackRes = await supabase.rpc('fn_ensure_current_driver', {
+      p_display_name: preferredName,
+      p_preferred_handle: preferredName,
+    })
+    data = fallbackRes.data
+    error = fallbackRes.error
+  }
+
+  if (error || !data) {
+    console.warn('Could not load driver profile from RPC:', error?.message)
+    return null
+  }
+
+  return mapDriverRowToProfile(
+    data as Record<string, unknown>,
+    userMeta?.avatarUrl
+  )
 }
 
 export async function saveDriverProfileToSupabase(
   profile: DriverProfile
-): Promise<void> {
+): Promise<DriverProfile | null> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return
+  if (!user) return null
 
+  const weightNumeric = profile.weightKg ? parseFloat(profile.weightKg) : null
+
+  // 1. Primary path: server-side RPC `fn_save_driver_profile` (handles @handle uniqueness & guarantees persistence)
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'fn_save_driver_profile',
+    {
+      p_username: profile.username.trim(),
+      p_first_name: profile.name.trim(),
+      p_surname: profile.surname.trim(),
+      p_driver_number: (profile.driverNumber || '').trim(),
+      p_weight_kg: Number.isNaN(weightNumeric) ? null : weightNumeric,
+      p_bio: profile.bio.trim(),
+      p_avatar_type: profile.avatarType === 'none' ? 'helmet' : profile.avatarType,
+      p_helmet_id: profile.helmetId || 'track-orange',
+      p_avatar_url: profile.customAvatarDataUrl,
+    }
+  )
+
+  if (!rpcError && rpcData) {
+    return mapDriverRowToProfile(rpcData as Record<string, unknown>)
+  }
+
+  // 2. Fallback direct update if RPC migration has not been run yet
   const cleanHandleBase = profile.username
     .trim()
     .toLowerCase()
@@ -174,7 +221,7 @@ export async function saveDriverProfileToSupabase(
   const displayName =
     `${profile.name} ${profile.surname}`.trim() || profile.username.toUpperCase()
 
-  const { error } = await supabase
+  const { data: updatedRow, error } = await supabase
     .from('drivers')
     .update({
       handle: validHandle,
@@ -182,17 +229,24 @@ export async function saveDriverProfileToSupabase(
       first_name: profile.name.trim(),
       surname: profile.surname.trim(),
       driver_number: (profile.driverNumber || '').trim(),
-      weight_kg: profile.weightKg ? parseFloat(profile.weightKg) : null,
+      weight_kg: Number.isNaN(weightNumeric) ? null : weightNumeric,
       bio: profile.bio.trim(),
-      avatar_type: profile.avatarType,
-      helmet_id: profile.helmetId,
+      avatar_type: profile.avatarType === 'none' ? 'helmet' : profile.avatarType,
+      helmet_id: profile.helmetId || 'track-orange',
       avatar_url: profile.customAvatarDataUrl,
     })
     .eq('user_id', user.id)
+    .select('*')
+    .maybeSingle()
 
   if (error) {
     console.warn('Failed to update driver row in Supabase:', error.message)
+    return null
   }
+
+  return updatedRow
+    ? mapDriverRowToProfile(updatedRow as Record<string, unknown>)
+    : null
 }
 
 export async function fetchAllLeagues(): Promise<League[]> {
