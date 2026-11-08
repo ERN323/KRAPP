@@ -35,7 +35,18 @@ export interface LeagueMemberItem {
   handle: string
   driverNumber: string
   appRole: LeagueRole
+  teamId?: string | null
+  teamName?: string | null
+  teamColorHex?: string | null
+  tags?: string[]
   joinedAt: string
+}
+
+export interface LeagueRaceEvent {
+  id: string
+  name: string
+  eventDate: string
+  roundNo: number
 }
 
 export interface AppNotification {
@@ -339,6 +350,12 @@ export async function fetchLeagueMembers(
     handle: String(row.handle || '@driver'),
     driverNumber: String(row.driver_number || String(idx + 1)),
     appRole: normalizeAppRole(row.app_role as string | null),
+    teamId: row.team_id ? String(row.team_id) : null,
+    teamName: row.team_name ? String(row.team_name) : null,
+    teamColorHex: row.team_color_hex ? String(row.team_color_hex) : null,
+    tags: Array.isArray(row.tags)
+      ? row.tags.map((t: unknown) => String(t))
+      : [],
     joinedAt: String(row.joined_at || new Date().toISOString()),
   }))
 }
@@ -507,4 +524,113 @@ export async function deleteLeagueTeamInSupabase(
       throw new Error(error.message)
     }
   }
+}
+
+export async function assignRacerToTeamInSupabase(
+  leagueId: string,
+  driverId: string,
+  teamId: string | null
+): Promise<void> {
+  const { error } = await supabase.rpc('fn_assign_racer_to_team', {
+    p_league_id: leagueId,
+    p_driver_id: driverId,
+    p_team_id: teamId,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
+
+export async function removeRacerFromLeagueInSupabase(
+  leagueId: string,
+  targetDriverId: string
+): Promise<void> {
+  const { error } = await supabase.rpc('fn_remove_racer_from_league', {
+    p_league_id: leagueId,
+    p_target_driver_id: targetDriverId,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
+
+export async function toggleDriverTagInSupabase(
+  leagueId: string,
+  targetDriverId: string,
+  tagName: '#debitant' | '#heavyweight'
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc('fn_toggle_driver_tag', {
+    p_league_id: leagueId,
+    p_target_driver_id: targetDriverId,
+    p_tag_name: tagName,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return Array.isArray(data) ? data.map((t: unknown) => String(t)) : []
+}
+
+export async function fetchLeagueEventsInSupabase(
+  leagueId: string
+): Promise<LeagueRaceEvent[]> {
+  const { data, error } = await supabase.rpc('fn_list_league_events', {
+    p_league_id: leagueId,
+  })
+
+  if (error || !Array.isArray(data)) {
+    // Fallback direct query on `events` if RPC migration hasn't been run yet
+    const { data: rows } = await supabase
+      .from('events')
+      .select('id, name, event_date, round_no')
+      .eq('league_id', leagueId)
+      .order('event_date', { ascending: false })
+
+    if (!Array.isArray(rows)) return []
+    return rows.map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      name: String(r.name || 'Race'),
+      eventDate: String(r.event_date || ''),
+      roundNo: Number(r.round_no || 1),
+    }))
+  }
+
+  return data.map((r: Record<string, unknown>) => ({
+    id: String(r.id),
+    name: String(r.name || 'Race'),
+    eventDate: String(r.event_date || ''),
+    roundNo: Number(r.round_no || 1),
+  }))
+}
+
+export async function assignDriverPenaltyInSupabase(input: {
+  leagueId: string
+  targetDriverId: string
+  eventId: string | null
+  kind: 'TIME' | 'DSQ'
+  seconds?: number
+  reason?: string
+  fallbackDate?: string
+  fallbackName?: string
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('fn_assign_driver_penalty', {
+    p_league_id: input.leagueId,
+    p_target_driver_id: input.targetDriverId,
+    p_event_id: input.eventId,
+    p_kind: input.kind,
+    p_seconds: input.kind === 'TIME' ? input.seconds || 5 : 0,
+    p_reason: input.reason || '',
+    p_fallback_date:
+      input.fallbackDate || new Date().toISOString().slice(0, 10),
+    p_fallback_name: input.fallbackName || 'Race Event',
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return String(data)
 }

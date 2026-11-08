@@ -39,6 +39,7 @@ import {
   ALL_LEAGUE_ROLES,
   LeagueMemberItem,
   LeagueTeam,
+  LeagueRaceEvent,
   AppNotification,
   fetchAllLeagues,
   createNewLeague,
@@ -53,6 +54,11 @@ import {
   fetchLeagueTeamsWithRosters,
   updateLeagueTeamInSupabase,
   deleteLeagueTeamInSupabase,
+  assignRacerToTeamInSupabase,
+  removeRacerFromLeagueInSupabase,
+  toggleDriverTagInSupabase,
+  fetchLeagueEventsInSupabase,
+  assignDriverPenaltyInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -96,10 +102,20 @@ export type AppView =
   | 'my-team'
   | 'my-team-manage-racers'
   | 'assign-roles'
+  | 'manage-racers'
   | 'create-team'
   | 'create-team-manage-racers'
   | 'league-setting-action'
   | 'notifications'
+
+export type ManageRacersStep =
+  | 'list'
+  | 'actions'
+  | 'select-team'
+  | 'remove-confirm'
+  | 'tag'
+  | 'penalty-races'
+  | 'penalty-type'
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -158,6 +174,27 @@ export function App() {
     null
   )
   const [myTeamSaveMsg, setMyTeamSaveMsg] = useState('')
+
+  // Manage Racers Screen State
+  const [manageRacersStep, setManageRacersStep] =
+    useState<ManageRacersStep>('list')
+  const [selectedManagedRacer, setSelectedManagedRacer] =
+    useState<LeagueMemberItem | null>(null)
+  const [manageTeamSearchQuery, setManageTeamSearchQuery] = useState('')
+  const [leagueRaceEvents, setLeagueRaceEvents] = useState<LeagueRaceEvent[]>([])
+  const [selectedPenaltyEvent, setSelectedPenaltyEvent] =
+    useState<LeagueRaceEvent | null>(null)
+  const [customPenaltyRaceDate, setCustomPenaltyRaceDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  )
+  const [customPenaltyRaceName, setCustomPenaltyRaceName] =
+    useState('Round 1 Race')
+  const [penaltyKind, setPenaltyKind] = useState<'TIME' | 'DSQ'>('TIME')
+  const [penaltySecondsInput, setPenaltySecondsInput] = useState('5')
+  const [penaltyReasonInput, setPenaltyReasonInput] = useState('')
+  const [manageRacerActionLoading, setManageRacerActionLoading] = useState(false)
+  const [manageRacerSuccessMsg, setManageRacerSuccessMsg] = useState('')
+  const [manageRacerErrorMsg, setManageRacerErrorMsg] = useState('')
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -757,6 +794,169 @@ export function App() {
     }
   }
 
+  const handleOpenManageRacers = async () => {
+    if (!selectedLeague) return
+    setMemberSearchQuery('')
+    setSelectedManagedRacer(null)
+    setManageRacersStep('list')
+    setManageTeamSearchQuery('')
+    setManageRacerSuccessMsg('')
+    setManageRacerErrorMsg('')
+    setActiveView('manage-racers')
+    setLoadingMembers(true)
+    const [members, teams, events] = await Promise.all([
+      fetchLeagueMembers(selectedLeague.id),
+      fetchLeagueTeamsWithRosters(selectedLeague.id),
+      fetchLeagueEventsInSupabase(selectedLeague.id),
+    ])
+    setLeagueMembers(members)
+    setLeagueTeams(teams)
+    setLeagueRaceEvents(events)
+    setLoadingMembers(false)
+  }
+
+  const handleAssignRacerToTeam = async (teamId: string | null) => {
+    if (!selectedLeague || !selectedManagedRacer) return
+    setManageRacerActionLoading(true)
+    setManageRacerErrorMsg('')
+    setManageRacerSuccessMsg('')
+    try {
+      await assignRacerToTeamInSupabase(
+        selectedLeague.id,
+        selectedManagedRacer.driverId,
+        teamId
+      )
+      const [members, teams] = await Promise.all([
+        fetchLeagueMembers(selectedLeague.id),
+        fetchLeagueTeamsWithRosters(selectedLeague.id),
+      ])
+      setLeagueMembers(members)
+      setLeagueTeams(teams)
+      const updatedRacer =
+        members.find((m) => m.driverId === selectedManagedRacer.driverId) ||
+        selectedManagedRacer
+      setSelectedManagedRacer(updatedRacer)
+      const assignedTeam = teams.find((t) => t.id === teamId)
+      setManageRacerSuccessMsg(
+        assignedTeam
+          ? `Assigned to team ${assignedTeam.name}!`
+          : 'Removed from team.'
+      )
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      setManageRacerErrorMsg(
+        err instanceof Error ? err.message : 'Failed to update team assignment'
+      )
+    } finally {
+      setManageRacerActionLoading(false)
+    }
+  }
+
+  const handleConfirmRemoveRacerFromLeague = async () => {
+    if (!selectedLeague || !selectedManagedRacer) return
+    setManageRacerActionLoading(true)
+    setManageRacerErrorMsg('')
+    setManageRacerSuccessMsg('')
+    try {
+      await removeRacerFromLeagueInSupabase(
+        selectedLeague.id,
+        selectedManagedRacer.driverId
+      )
+      const [members, teams] = await Promise.all([
+        fetchLeagueMembers(selectedLeague.id),
+        fetchLeagueTeamsWithRosters(selectedLeague.id),
+      ])
+      setLeagueMembers(members)
+      setLeagueTeams(teams)
+      setSelectedManagedRacer(null)
+      setManageRacersStep('list')
+    } catch (err: unknown) {
+      setManageRacerErrorMsg(
+        err instanceof Error ? err.message : 'Failed to remove racer from league'
+      )
+    } finally {
+      setManageRacerActionLoading(false)
+    }
+  }
+
+  const handleToggleRacerTag = async (tag: '#debitant' | '#heavyweight') => {
+    if (!selectedLeague || !selectedManagedRacer) return
+    setManageRacerActionLoading(true)
+    setManageRacerErrorMsg('')
+    setManageRacerSuccessMsg('')
+    try {
+      const updatedTags = await toggleDriverTagInSupabase(
+        selectedLeague.id,
+        selectedManagedRacer.driverId,
+        tag
+      )
+      const updatedRacer: LeagueMemberItem = {
+        ...selectedManagedRacer,
+        tags: updatedTags,
+      }
+      setSelectedManagedRacer(updatedRacer)
+      setLeagueMembers((prev) =>
+        prev.map((m) =>
+          m.driverId === updatedRacer.driverId ? updatedRacer : m
+        )
+      )
+      setManageRacerSuccessMsg(
+        updatedTags.includes(tag)
+          ? `Added ${tag.toUpperCase()} tag!`
+          : `Removed ${tag.toUpperCase()} tag.`
+      )
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      setManageRacerErrorMsg(
+        err instanceof Error ? err.message : 'Failed to toggle tag'
+      )
+    } finally {
+      setManageRacerActionLoading(false)
+    }
+  }
+
+  const handleConfirmAssignPenalty = async () => {
+    if (!selectedLeague || !selectedManagedRacer) return
+    const parsedSeconds = parseFloat(penaltySecondsInput)
+    if (penaltyKind === 'TIME' && (Number.isNaN(parsedSeconds) || parsedSeconds <= 0)) {
+      setManageRacerErrorMsg('Please enter valid penalty seconds (> 0)')
+      return
+    }
+
+    setManageRacerActionLoading(true)
+    setManageRacerErrorMsg('')
+    setManageRacerSuccessMsg('')
+    try {
+      await assignDriverPenaltyInSupabase({
+        leagueId: selectedLeague.id,
+        targetDriverId: selectedManagedRacer.driverId,
+        eventId: selectedPenaltyEvent ? selectedPenaltyEvent.id : null,
+        kind: penaltyKind,
+        seconds: penaltyKind === 'TIME' ? parsedSeconds : 0,
+        reason: penaltyReasonInput.trim(),
+        fallbackDate: customPenaltyRaceDate,
+        fallbackName: customPenaltyRaceName.trim() || 'Race Event',
+      })
+
+      const refreshedEvents = await fetchLeagueEventsInSupabase(
+        selectedLeague.id
+      )
+      setLeagueRaceEvents(refreshedEvents)
+      setManageRacerSuccessMsg(
+        penaltyKind === 'TIME'
+          ? `Assigned +${parsedSeconds}s time penalty!`
+          : 'Assigned Disqualification (DSQ — banned for next race)!'
+      )
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      setManageRacerErrorMsg(
+        err instanceof Error ? err.message : 'Failed to assign penalty'
+      )
+    } finally {
+      setManageRacerActionLoading(false)
+    }
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
     if (actionTitle === 'MY TEAM') {
       handleOpenMyTeam()
@@ -764,6 +964,10 @@ export function App() {
     }
     if (actionTitle === 'ASSIGN ROLES') {
       handleOpenAssignRoles()
+      return
+    }
+    if (actionTitle === 'MANAGE RACERS') {
+      handleOpenManageRacers()
       return
     }
     if (actionTitle === 'CREATE TEAM') {
@@ -2345,6 +2549,719 @@ export function App() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 8B. MANAGE RACERS SCREEN (Team, Remove, #Tag, Penalty) ================= */}
+        {activeView === 'manage-racers' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="SETTINGS"
+              onBack={() => {
+                setManageRacerSuccessMsg('')
+                setManageRacerErrorMsg('')
+                if (manageRacersStep === 'penalty-type') {
+                  setManageRacersStep('penalty-races')
+                } else if (
+                  manageRacersStep === 'select-team' ||
+                  manageRacersStep === 'remove-confirm' ||
+                  manageRacersStep === 'tag' ||
+                  manageRacersStep === 'penalty-races'
+                ) {
+                  setManageRacersStep('actions')
+                } else if (manageRacersStep === 'actions') {
+                  setSelectedManagedRacer(null)
+                  setManageRacersStep('list')
+                } else {
+                  setActiveView('league-options')
+                }
+              }}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col">
+              <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center mb-3">
+                MANAGE RACERS
+              </h2>
+
+              {/* STEP 1: RACER LIST WITH SEARCH BAR */}
+              {manageRacersStep === 'list' && (
+                <>
+                  <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-4 shadow-inner">
+                    <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                    <input
+                      type="text"
+                      value={memberSearchQuery}
+                      onChange={(e) => setMemberSearchQuery(e.target.value)}
+                      placeholder="SEARCH NAME - NUMBER"
+                      className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                    />
+                  </div>
+
+                  <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col">
+                    {loadingMembers ? (
+                      <div className="flex-1 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
+                        Loading league racers...
+                      </div>
+                    ) : filteredLeagueMembers.length > 0 ? (
+                      <div className="flex flex-col gap-3 overflow-y-auto">
+                        {filteredLeagueMembers.map((member, idx) => (
+                          <button
+                            key={member.driverId}
+                            type="button"
+                            onClick={() => {
+                              setSelectedManagedRacer(member)
+                              setManageRacersStep('actions')
+                              setManageRacerSuccessMsg('')
+                              setManageRacerErrorMsg('')
+                            }}
+                            className="w-full bg-[#1C2228] hover:bg-[#242C35] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full min-h-[2.75rem] py-2 px-5 flex items-center justify-between gap-2 shadow-md cursor-pointer"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate">
+                              {formatMemberLabel(member, idx)}
+                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {member.teamName && (
+                                <span
+                                  className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border text-white flex items-center gap-1"
+                                  style={{
+                                    borderColor: member.teamColorHex || '#FF6B00',
+                                  }}
+                                >
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{
+                                      backgroundColor:
+                                        member.teamColorHex || '#FF6B00',
+                                    }}
+                                  />
+                                  {member.teamName}
+                                </span>
+                              )}
+                              {member.tags?.map((tg) => (
+                                <span
+                                  key={tg}
+                                  className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#38BDF8]/15 border border-[#38BDF8]/40 text-[#38BDF8]"
+                                >
+                                  {tg}
+                                </span>
+                              ))}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+                        <p className="font-display font-extrabold text-base text-white uppercase tracking-wider mb-1">
+                          NO RACERS MATCHING SEARCH
+                        </p>
+                        <p className="text-xs text-[#8A99AD]">
+                          Try searching by driver name, handle, or driver number.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* SELECTED RACER HEADER PILL (Shown on all sub-steps once a racer is clicked) */}
+              {manageRacersStep !== 'list' && selectedManagedRacer && (
+                <div className="flex flex-col flex-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedManagedRacer(null)
+                      setManageRacersStep('list')
+                      setManageRacerSuccessMsg('')
+                      setManageRacerErrorMsg('')
+                    }}
+                    className="w-full bg-[#14191E] border border-[#FF6B00] rounded-full h-11 px-5 flex items-center justify-center relative mb-4 shadow-md cursor-pointer"
+                  >
+                    <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate">
+                      {formatMemberLabel(
+                        selectedManagedRacer,
+                        leagueMembers.findIndex(
+                          (m) => m.driverId === selectedManagedRacer.driverId
+                        )
+                      )}
+                    </span>
+                  </button>
+
+                  {/* Outer Sub-Step Container */}
+                  <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-center">
+                    {/* STEP 2: 4 MAIN ACTIONS (SELECT TEAM, REMOVE FROM LEAGUE, #TAG, ASSIGN PENALTY) */}
+                    {manageRacersStep === 'actions' && (
+                      <div className="bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManageTeamSearchQuery('')
+                            setManageRacerSuccessMsg('')
+                            setManageRacerErrorMsg('')
+                            setManageRacersStep('select-team')
+                          }}
+                          className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center cursor-pointer"
+                        >
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            SELECT TEAM
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManageRacerSuccessMsg('')
+                            setManageRacerErrorMsg('')
+                            setManageRacersStep('remove-confirm')
+                          }}
+                          className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-red-500 active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center cursor-pointer"
+                        >
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            REMOVE FROM LEAGUE
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManageRacerSuccessMsg('')
+                            setManageRacerErrorMsg('')
+                            setManageRacersStep('tag')
+                          }}
+                          className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-[#38BDF8] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center cursor-pointer"
+                        >
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            #TAG
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManageRacerSuccessMsg('')
+                            setManageRacerErrorMsg('')
+                            setSelectedPenaltyEvent(null)
+                            setManageRacersStep('penalty-races')
+                          }}
+                          className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center cursor-pointer"
+                        >
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            ASSIGN PENALTY
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* STEP 3A: SELECT TEAM (Search Team + Team Cards with Name, Logo, Racer Count) */}
+                    {manageRacersStep === 'select-team' && (
+                      <div className="flex flex-col flex-1">
+                        <div className="w-full bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-3">
+                          <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                          <input
+                            type="text"
+                            value={manageTeamSearchQuery}
+                            onChange={(e) =>
+                              setManageTeamSearchQuery(e.target.value)
+                            }
+                            placeholder="SEARCH TEAM"
+                            className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                          />
+                        </div>
+
+                        <div className="flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-2.5 overflow-y-auto max-h-80">
+                          {(() => {
+                            const q = manageTeamSearchQuery.trim().toLowerCase()
+                            const matchingTeams = leagueTeams.filter(
+                              (t) => !q || t.name.toLowerCase().includes(q)
+                            )
+
+                            if (matchingTeams.length === 0) {
+                              return (
+                                <div className="py-8 text-center text-xs text-[#8A99AD]">
+                                  {leagueTeams.length === 0
+                                    ? 'No teams have been created in this league yet.'
+                                    : 'No teams match your search.'}
+                                </div>
+                              )
+                            }
+
+                            return matchingTeams.map((team) => {
+                              const isCurrentTeam =
+                                selectedManagedRacer.teamId === team.id ||
+                                team.members.some(
+                                  (m) =>
+                                    m.driverId === selectedManagedRacer.driverId
+                                )
+
+                              return (
+                                <button
+                                  key={team.id}
+                                  type="button"
+                                  disabled={manageRacerActionLoading}
+                                  onClick={() => handleAssignRacerToTeam(team.id)}
+                                  className={`w-full rounded-2xl p-3 flex items-center justify-between gap-3 border transition-all cursor-pointer disabled:opacity-50 ${
+                                    isCurrentTeam
+                                      ? 'bg-[#FF6B00] text-black border-2 border-white shadow-lg shadow-[#FF6B00]/25'
+                                      : 'bg-[#14191E] hover:bg-[#222930] text-white border-[#2A323B] hover:border-[#FF6B00]'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    {/* Team Circular Logo */}
+                                    <div
+                                      className="w-11 h-11 rounded-full bg-[#1C2228] flex items-center justify-center overflow-hidden shrink-0"
+                                      style={{
+                                        borderWidth: '2px',
+                                        borderStyle: 'solid',
+                                        borderColor: isCurrentTeam
+                                          ? '#000000'
+                                          : team.colorHex || '#FF6B00',
+                                      }}
+                                    >
+                                      {team.logoUrl ? (
+                                        <img
+                                          src={team.logoUrl}
+                                          alt={team.name}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        <Shield
+                                          className="w-5 h-5"
+                                          style={{
+                                            color: team.colorHex || '#FF6B00',
+                                          }}
+                                        />
+                                      )}
+                                    </div>
+
+                                    <div className="text-left min-w-0">
+                                      <span
+                                        className={`font-display font-extrabold text-lg tracking-wider uppercase block truncate ${
+                                          isCurrentTeam
+                                            ? 'text-black'
+                                            : 'text-[#FF6B00]'
+                                        }`}
+                                      >
+                                        {team.name}
+                                      </span>
+                                      <span
+                                        className={`text-[10px] font-bold uppercase tracking-wider block ${
+                                          isCurrentTeam
+                                            ? 'text-black/80'
+                                            : 'text-[#8A99AD]'
+                                        }`}
+                                      >
+                                        {team.members.length}{' '}
+                                        {team.members.length === 1
+                                          ? 'RACER'
+                                          : 'RACERS'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {isCurrentTeam && (
+                                    <Check className="w-5 h-5 text-black stroke-[3] shrink-0" />
+                                  )}
+                                </button>
+                              )
+                            })
+                          })()}
+
+                          {selectedManagedRacer.teamId && (
+                            <button
+                              type="button"
+                              disabled={manageRacerActionLoading}
+                              onClick={() => handleAssignRacerToTeam(null)}
+                              className="w-full mt-1 py-2 rounded-full border border-red-500/50 text-red-400 hover:bg-red-500/10 text-xs font-extrabold uppercase tracking-wider transition cursor-pointer"
+                            >
+                              Remove from Current Team
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* STEP 3B: REMOVE FROM LEAGUE CONFIRMATION */}
+                    {manageRacersStep === 'remove-confirm' && (
+                      <div className="flex flex-col flex-1 justify-center">
+                        <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-11 px-5 flex items-center justify-center mb-4">
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            REMOVE FROM LEAGUE
+                          </span>
+                        </div>
+
+                        <div className="bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-5 flex flex-col gap-3">
+                          <p className="text-xs text-[#8A99AD] text-center mb-1">
+                            Are you sure you want to remove{' '}
+                            <strong className="text-white uppercase">
+                              {selectedManagedRacer.displayName}
+                            </strong>{' '}
+                            from <strong className="text-[#FF6B00]">{selectedLeague.name}</strong>?
+                          </p>
+
+                          <button
+                            type="button"
+                            disabled={manageRacerActionLoading}
+                            onClick={handleConfirmRemoveRacerFromLeague}
+                            className="w-full bg-[#14191E] hover:bg-[#dc2626] text-[#FF6B00] hover:text-white border border-[#2A323B] hover:border-red-400 active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider uppercase">
+                              {manageRacerActionLoading ? 'REMOVING...' : 'CONFIRM'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={manageRacerActionLoading}
+                            onClick={() => setManageRacersStep('actions')}
+                            className="w-full bg-[#14191E] hover:bg-[#222930] text-[#FF6B00] border border-[#2A323B] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center cursor-pointer"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider uppercase">
+                              CANCEL
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* STEP 3C: #TAG (#debitant & #heavyweight) */}
+                    {manageRacersStep === 'tag' && (
+                      <div className="flex flex-col flex-1 justify-center">
+                        <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-11 px-5 flex items-center justify-center mb-4">
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            #TAG
+                          </span>
+                        </div>
+
+                        <div className="bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col gap-3">
+                          {(
+                            [
+                              {
+                                tag: '#debitant' as const,
+                                label: '#DEBITANT',
+                                desc: 'First-season newcomer — filterable in race performance',
+                              },
+                              {
+                                tag: '#heavyweight' as const,
+                                label: '#HEAVYWEIGHT',
+                                desc: 'Heavyweight class — filterable to see fastest heavyweights',
+                              },
+                            ]
+                          ).map((item) => {
+                            const hasTag = Boolean(
+                              selectedManagedRacer.tags?.includes(item.tag)
+                            )
+                            return (
+                              <button
+                                key={item.tag}
+                                type="button"
+                                disabled={manageRacerActionLoading}
+                                onClick={() => handleToggleRacerTag(item.tag)}
+                                className={`w-full rounded-2xl p-3.5 flex items-center justify-between gap-3 border transition-all cursor-pointer disabled:opacity-50 ${
+                                  hasTag
+                                    ? 'bg-[#FF6B00] text-black border-2 border-white shadow-lg shadow-[#FF6B00]/20'
+                                    : 'bg-[#14191E] hover:bg-[#222930] text-[#FF6B00] border-[#2A323B] hover:border-[#FF6B00]'
+                                }`}
+                              >
+                                <div className="text-left">
+                                  <span className="font-display font-extrabold text-lg tracking-wider uppercase block">
+                                    {item.label}
+                                  </span>
+                                  <span
+                                    className={`text-[10px] font-semibold block ${
+                                      hasTag ? 'text-black/80' : 'text-[#8A99AD]'
+                                    }`}
+                                  >
+                                    {item.desc}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
+                                    hasTag
+                                      ? 'bg-black border-black text-[#FF6B00]'
+                                      : 'border-[#8A99AD]'
+                                  }`}
+                                >
+                                  {hasTag && (
+                                    <Check className="w-3.5 h-3.5 stroke-[3.5]" />
+                                  )}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* STEP 3D: ASSIGN PENALTY — STEP 1: PICK RACE (Date & Title) */}
+                    {manageRacersStep === 'penalty-races' && (
+                      <div className="flex flex-col flex-1">
+                        <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-10 px-5 flex items-center justify-center mb-3">
+                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                            ASSIGN PENALTY
+                          </span>
+                        </div>
+
+                        <div className="flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-2.5">
+                          <div className="w-full bg-[#14191E] border border-[#2A323B] rounded-full h-10 px-5 flex items-center justify-center">
+                            <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                              RACES
+                            </span>
+                          </div>
+
+                          {leagueRaceEvents.length > 0 ? (
+                            <div className="flex flex-col gap-2.5 overflow-y-auto max-h-56">
+                              {leagueRaceEvents.map((ev) => {
+                                const formattedDate = ev.eventDate
+                                  ? ev.eventDate.split('-').reverse().join('.')
+                                  : ev.eventDate
+                                return (
+                                  <button
+                                    key={ev.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedPenaltyEvent(ev)
+                                      setPenaltyKind('TIME')
+                                      setPenaltySecondsInput('5')
+                                      setPenaltyReasonInput('')
+                                      setManageRacerSuccessMsg('')
+                                      setManageRacerErrorMsg('')
+                                      setManageRacersStep('penalty-type')
+                                    }}
+                                    className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-between cursor-pointer"
+                                  >
+                                    <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
+                                      {formattedDate}
+                                    </span>
+                                    <span className="text-xs font-bold text-white uppercase truncate ml-2">
+                                      {ev.name}
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          ) : (
+                            <div className="py-2 text-center text-[11px] text-[#8A99AD]">
+                              No races scheduled yet — pick or create a race date below to apply a penalty:
+                            </div>
+                          )}
+
+                          {/* Quick Race Date Picker (works even before Schedule Race is used) */}
+                          <div className="mt-auto pt-2 border-t border-[#2A323B] flex flex-col gap-2">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A99AD] text-center">
+                              Or Select / Enter Race Date &amp; Title
+                            </span>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="date"
+                                value={customPenaltyRaceDate}
+                                onChange={(e) =>
+                                  setCustomPenaltyRaceDate(e.target.value)
+                                }
+                                className="bg-[#14191E] border border-[#2A323B] rounded-full h-9 px-3 text-xs font-bold text-[#FF6B00] focus:outline-none focus:border-[#FF6B00]"
+                              />
+                              <input
+                                type="text"
+                                value={customPenaltyRaceName}
+                                onChange={(e) =>
+                                  setCustomPenaltyRaceName(e.target.value)
+                                }
+                                placeholder="Race Title"
+                                className="bg-[#14191E] border border-[#2A323B] rounded-full h-9 px-3 text-xs font-bold text-white uppercase focus:outline-none focus:border-[#FF6B00]"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPenaltyEvent(null)
+                                setPenaltyKind('TIME')
+                                setPenaltySecondsInput('5')
+                                setPenaltyReasonInput('')
+                                setManageRacerSuccessMsg('')
+                                setManageRacerErrorMsg('')
+                                setManageRacersStep('penalty-type')
+                              }}
+                              className="w-full bg-[#14191E] hover:bg-[#222930] border border-[#FF6B00]/60 rounded-full h-10 px-4 flex items-center justify-center cursor-pointer"
+                            >
+                              <span className="font-display font-extrabold text-sm tracking-wider text-[#FF6B00] uppercase">
+                                USE {customPenaltyRaceDate.split('-').reverse().join('.')} — {customPenaltyRaceName || 'RACE'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* STEP 3E: ASSIGN PENALTY — STEP 2: CHOOSE SECONDS OR DISQUALIFICATION */}
+                    {manageRacersStep === 'penalty-type' && (
+                      <div className="flex flex-col flex-1 justify-between gap-3">
+                        <div className="flex flex-col gap-2.5">
+                          <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-10 px-4 flex items-center justify-between">
+                            <span className="font-display font-extrabold text-sm tracking-wider text-[#FF6B00] uppercase">
+                              RACE:
+                            </span>
+                            <span className="font-display font-extrabold text-sm tracking-wider text-white uppercase truncate ml-2">
+                              {selectedPenaltyEvent
+                                ? `${selectedPenaltyEvent.eventDate
+                                    .split('-')
+                                    .reverse()
+                                    .join('.')} — ${selectedPenaltyEvent.name}`
+                                : `${customPenaltyRaceDate
+                                    .split('-')
+                                    .reverse()
+                                    .join('.')} — ${customPenaltyRaceName}`}
+                            </span>
+                          </div>
+
+                          {/* Penalty Kind Toggle: SECONDS vs DISQUALIFICATION */}
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => setPenaltyKind('TIME')}
+                              className={`rounded-2xl p-3 border flex flex-col items-center justify-center text-center transition cursor-pointer ${
+                                penaltyKind === 'TIME'
+                                  ? 'bg-[#FF6B00] text-black border-2 border-white shadow-lg shadow-[#FF6B00]/25'
+                                  : 'bg-[#1C2228] text-[#FF6B00] border-[#2A323B] hover:border-[#FF6B00]'
+                              }`}
+                            >
+                              <span className="font-display font-extrabold text-base tracking-wider uppercase">
+                                + SECONDS
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold mt-0.5 ${
+                                  penaltyKind === 'TIME'
+                                    ? 'text-black/80'
+                                    : 'text-[#8A99AD]'
+                                }`}
+                              >
+                                Adds time to drive &amp; adjusts position
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setPenaltyKind('DSQ')}
+                              className={`rounded-2xl p-3 border flex flex-col items-center justify-center text-center transition cursor-pointer ${
+                                penaltyKind === 'DSQ'
+                                  ? 'bg-[#dc2626] text-white border-2 border-white shadow-lg shadow-red-600/25'
+                                  : 'bg-[#1C2228] text-red-400 border-[#2A323B] hover:border-red-500'
+                              }`}
+                            >
+                              <span className="font-display font-extrabold text-base tracking-wider uppercase">
+                                DISQUALIFICATION
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold mt-0.5 ${
+                                  penaltyKind === 'DSQ'
+                                    ? 'text-white/90'
+                                    : 'text-[#8A99AD]'
+                                }`}
+                              >
+                                DSQ — cannot race in next event
+                              </span>
+                            </button>
+                          </div>
+
+                          {penaltyKind === 'TIME' ? (
+                            <div className="bg-[#1C2228] border border-[#2A323B] rounded-2xl p-3 flex flex-col gap-2">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A99AD] text-center">
+                                Select or Enter Extra Penalty Seconds
+                              </span>
+                              <div className="grid grid-cols-4 gap-2">
+                                {['3', '5', '10', '15'].map((sec) => (
+                                  <button
+                                    key={sec}
+                                    type="button"
+                                    onClick={() => setPenaltySecondsInput(sec)}
+                                    className={`h-9 rounded-full font-display font-extrabold text-sm tracking-wider uppercase border transition cursor-pointer ${
+                                      penaltySecondsInput === sec
+                                        ? 'bg-[#FF6B00] text-black border-white'
+                                        : 'bg-[#14191E] text-[#FF6B00] border-[#2A323B]'
+                                    }`}
+                                  >
+                                    +{sec}S
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xs font-bold uppercase text-[#8A99AD] shrink-0">
+                                  Custom Seconds:
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  value={penaltySecondsInput}
+                                  onChange={(e) =>
+                                    setPenaltySecondsInput(e.target.value)
+                                  }
+                                  className="w-full bg-[#14191E] border border-[#2A323B] rounded-full h-9 px-3 text-center font-display font-extrabold text-base text-white focus:outline-none focus:border-[#FF6B00]"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-red-950/30 border border-red-800/50 rounded-2xl p-3 text-center">
+                              <p className="text-xs font-bold text-red-300 uppercase tracking-wide">
+                                Disqualification (DSQ)
+                              </p>
+                              <p className="text-[11px] text-[#8A99AD] mt-1">
+                                This driver will be disqualified from this race and flagged as unable to participate in the next race.
+                              </p>
+                            </div>
+                          )}
+
+                          <input
+                            type="text"
+                            value={penaltyReasonInput}
+                            onChange={(e) => setPenaltyReasonInput(e.target.value)}
+                            placeholder="Optional reason (e.g. Track limits / Contact)"
+                            className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-10 px-4 text-xs text-white placeholder-[#8A99AD] focus:outline-none focus:border-[#FF6B00]"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setManageRacersStep('penalty-races')}
+                            className="bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] rounded-full h-11 flex items-center justify-center cursor-pointer"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider text-[#EF4444] uppercase">
+                              CANCEL
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={manageRacerActionLoading}
+                            onClick={handleConfirmAssignPenalty}
+                            className="bg-[#FF6B00] hover:bg-[#ff7b1a] rounded-full h-11 flex items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer disabled:opacity-50"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
+                              {manageRacerActionLoading ? 'APPLYING...' : 'CONFIRM'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Status & Error Alerts inside Manage Racers */}
+                    {manageRacerSuccessMsg && (
+                      <div className="mt-3 flex items-center gap-2 bg-[#38BDF8]/10 border border-[#38BDF8]/40 rounded-2xl p-2.5 text-xs text-[#38BDF8] font-semibold">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{manageRacerSuccessMsg}</span>
+                      </div>
+                    )}
+
+                    {manageRacerErrorMsg && (
+                      <p className="mt-3 text-xs text-red-400 text-center font-semibold">
+                        {manageRacerErrorMsg}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
