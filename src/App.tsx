@@ -21,6 +21,9 @@ import {
   CheckCircle2,
   Palette,
   ImagePlus,
+  Shield,
+  Pencil,
+  UserMinus,
 } from 'lucide-react'
 import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
@@ -35,6 +38,7 @@ import {
   LeagueRole,
   ALL_LEAGUE_ROLES,
   LeagueMemberItem,
+  LeagueTeam,
   AppNotification,
   fetchAllLeagues,
   createNewLeague,
@@ -46,6 +50,8 @@ import {
   fetchMyNotifications,
   markAllNotificationsRead,
   createLeagueTeamInSupabase,
+  fetchLeagueTeamsWithRosters,
+  updateLeagueTeamInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -86,6 +92,8 @@ export type AppView =
   | 'league-races'
   | 'league-hall-of-fame'
   | 'league-options'
+  | 'my-team'
+  | 'my-team-manage-racers'
   | 'assign-roles'
   | 'create-team'
   | 'create-team-manage-racers'
@@ -127,7 +135,7 @@ export function App() {
   const [assigningRoleLoading, setAssigningRoleLoading] = useState(false)
   const [roleAssignSuccessMsg, setRoleAssignSuccessMsg] = useState('')
 
-  // Create Team Screen State
+  // Create Team / Edit Team Screen State
   const [teamName, setTeamName] = useState('')
   const [teamColorHex, setTeamColorHex] = useState('#FF6B00')
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false)
@@ -139,6 +147,13 @@ export function App() {
   const [teamCreateError, setTeamCreateError] = useState('')
   const [isCreatingTeam, setIsCreatingTeam] = useState(false)
   const teamLogoInputRef = useRef<HTMLInputElement>(null)
+
+  // My Team Inspection & Edit State
+  const [leagueTeams, setLeagueTeams] = useState<LeagueTeam[]>([])
+  const [loadingTeams, setLoadingTeams] = useState(false)
+  const [selectedMyTeamId, setSelectedMyTeamId] = useState<string | null>(null)
+  const [isEditingMyTeam, setIsEditingMyTeam] = useState(false)
+  const [myTeamSaveMsg, setMyTeamSaveMsg] = useState('')
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -541,7 +556,120 @@ export function App() {
     }
   }
 
+  const populateTeamEditFields = (team: LeagueTeam) => {
+    setTeamName(team.name)
+    setTeamColorHex(team.colorHex || '#FF6B00')
+    setTeamLogoDataUrl(team.logoUrl)
+    setSelectedTeamDriverIds(team.members.map((m) => m.driverId))
+    setTeamCreateError('')
+  }
+
+  const handleOpenMyTeam = async () => {
+    if (!selectedLeague) return
+    setIsEditingMyTeam(false)
+    setMyTeamSaveMsg('')
+    setTeamCreateError('')
+    setActiveView('my-team')
+    setLoadingTeams(true)
+    const [teams, members] = await Promise.all([
+      fetchLeagueTeamsWithRosters(selectedLeague.id),
+      fetchLeagueMembers(selectedLeague.id),
+    ])
+    setLeagueTeams(teams)
+    setLeagueMembers(members)
+    const myTeam = teams.find((t) => t.isMyTeam) || teams[0] || null
+    if (myTeam) {
+      setSelectedMyTeamId(myTeam.id)
+      populateTeamEditFields(myTeam)
+    } else {
+      setSelectedMyTeamId(null)
+    }
+    setLoadingTeams(false)
+  }
+
+  const handleSelectTeamToInspect = (team: LeagueTeam) => {
+    setSelectedMyTeamId(team.id)
+    setIsEditingMyTeam(false)
+    setMyTeamSaveMsg('')
+    populateTeamEditFields(team)
+  }
+
+  const handleKickTeamMemberDirect = async (
+    team: LeagueTeam,
+    driverIdToKick: string
+  ) => {
+    if (!selectedLeague) return
+    const updatedDriverIds = team.members
+      .map((m) => m.driverId)
+      .filter((id) => id !== driverIdToKick)
+
+    setIsCreatingTeam(true)
+    setMyTeamSaveMsg('')
+    setTeamCreateError('')
+    try {
+      await updateLeagueTeamInSupabase({
+        teamId: team.id,
+        name: isEditingMyTeam ? teamName : team.name,
+        colorHex: isEditingMyTeam ? teamColorHex : team.colorHex,
+        logoUrl: isEditingMyTeam ? teamLogoDataUrl : team.logoUrl,
+        driverIds: updatedDriverIds,
+      })
+
+      setSelectedTeamDriverIds(updatedDriverIds)
+      const refreshed = await fetchLeagueTeamsWithRosters(selectedLeague.id)
+      setLeagueTeams(refreshed)
+      setMyTeamSaveMsg('Teammate removed from team.')
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      setTeamCreateError(
+        err instanceof Error ? err.message : 'Failed to remove teammate'
+      )
+    } finally {
+      setIsCreatingTeam(false)
+    }
+  }
+
+  const handleSaveMyTeamChanges = async () => {
+    if (!selectedLeague || !selectedMyTeamId) return
+    if (!teamName.trim()) {
+      setTeamCreateError('Team name cannot be empty')
+      return
+    }
+    const cleanHex = teamColorHex.trim().startsWith('#')
+      ? teamColorHex.trim()
+      : `#${teamColorHex.trim()}`
+
+    setIsCreatingTeam(true)
+    setTeamCreateError('')
+    setMyTeamSaveMsg('')
+    try {
+      await updateLeagueTeamInSupabase({
+        teamId: selectedMyTeamId,
+        name: teamName,
+        colorHex: cleanHex,
+        logoUrl: teamLogoDataUrl,
+        driverIds: selectedTeamDriverIds,
+      })
+
+      const refreshed = await fetchLeagueTeamsWithRosters(selectedLeague.id)
+      setLeagueTeams(refreshed)
+      setIsEditingMyTeam(false)
+      setMyTeamSaveMsg('Team updated & notifications sent!')
+      fetchMyNotifications().then((loaded) => setNotifications(loaded))
+    } catch (err: unknown) {
+      setTeamCreateError(
+        err instanceof Error ? err.message : 'Failed to update team'
+      )
+    } finally {
+      setIsCreatingTeam(false)
+    }
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
+    if (actionTitle === 'MY TEAM') {
+      handleOpenMyTeam()
+      return
+    }
     if (actionTitle === 'ASSIGN ROLES') {
       handleOpenAssignRoles()
       return
@@ -1307,6 +1435,18 @@ export function App() {
             />
 
             <div className="flex flex-col gap-4 px-5 flex-1 justify-start">
+              {/* 0. MY TEAM BUTTON — Located just above all settings of the league, visible to everyone */}
+              <button
+                type="button"
+                onClick={handleOpenMyTeam}
+                className="w-full bg-[#1C2228] hover:bg-[#242C35] border-2 border-[#FF6B00]/80 hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full h-12 px-5 flex items-center justify-center gap-2.5 shadow-lg shadow-[#FF6B00]/10 cursor-pointer"
+              >
+                <Shield className="w-4 h-4 text-[#FF6B00]" />
+                <span className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase">
+                  MY TEAM
+                </span>
+              </button>
+
               {/* 1. ONLY ADMINS BOX — Visible only when user is ADMIN or CO-ADMIN */}
               {isEffectiveAdmin && (
                 <section className="w-full bg-[#1C2228] rounded-2xl border border-[#2A323B] p-4 flex flex-col gap-2.5 shadow-lg">
@@ -1460,6 +1600,479 @@ export function App() {
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 7B. MY TEAM SCREEN (Inspect & Edit Team) ================= */}
+        {activeView === 'my-team' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="MY TEAM"
+              onBack={() => {
+                setIsEditingMyTeam(false)
+                setActiveView('league-options')
+              }}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-between gap-4">
+              {loadingTeams ? (
+                <div className="flex-1 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
+                  Loading team details...
+                </div>
+              ) : leagueTeams.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+                  <div className="w-16 h-16 rounded-full bg-[#14191E] border-2 border-[#2A323B] flex items-center justify-center text-[#8A99AD] mb-3">
+                    <Shield className="w-8 h-8" />
+                  </div>
+                  <h2 className="font-display font-extrabold text-xl tracking-wider text-white uppercase mb-1">
+                    NO TEAMS CREATED YET
+                  </h2>
+                  <p className="text-xs text-[#8A99AD] max-w-xs mb-5">
+                    No teams have been created in this league yet. Team Captains and Admins can create a team from League Settings.
+                  </p>
+                  {isEffectiveCaptainOrAbove && (
+                    <button
+                      type="button"
+                      onClick={handleOpenCreateTeam}
+                      className="px-6 py-2.5 rounded-full bg-[#FF6B00] hover:bg-[#ff7b1a] text-black font-display font-extrabold text-sm tracking-wider uppercase shadow-lg shadow-[#FF6B00]/20 transition cursor-pointer"
+                    >
+                      CREATE TEAM NOW
+                    </button>
+                  )}
+                </div>
+              ) : (
+                (() => {
+                  const activeTeam =
+                    leagueTeams.find((t) => t.id === selectedMyTeamId) ||
+                    leagueTeams[0]
+                  const displayColor = isEditingMyTeam
+                    ? teamColorHex
+                    : activeTeam.colorHex || '#FF6B00'
+                  const displayLogo = isEditingMyTeam
+                    ? teamLogoDataUrl
+                    : activeTeam.logoUrl
+
+                  return (
+                    <>
+                      <div className="flex flex-col gap-3.5">
+                        {/* Team Switcher Pills (if league has multiple teams) */}
+                        {leagueTeams.length > 1 && (
+                          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                            {leagueTeams.map((t) => {
+                              const isSelected = t.id === activeTeam.id
+                              return (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => handleSelectTeamToInspect(t)}
+                                  className={`px-3 py-1.5 rounded-full text-xs font-display font-extrabold uppercase tracking-wider flex items-center gap-1.5 shrink-0 border transition cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-[#14191E] text-white border-[#FF6B00]'
+                                      : 'bg-[#14191E]/50 text-[#8A99AD] border-[#2A323B] hover:text-white'
+                                  }`}
+                                >
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                                    style={{ backgroundColor: t.colorHex }}
+                                  />
+                                  <span>{t.name}</span>
+                                  {t.isMyTeam && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-[#FF6B00] text-black font-extrabold">
+                                      MY TEAM
+                                    </span>
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+
+                        {/* Team Identity Banner: Circular Logo + Team Name + Color + Edit Toggle */}
+                        <div className="bg-[#14191E] border border-[#2A323B] rounded-2xl p-4 flex flex-col items-center text-center relative">
+                          {isEffectiveCaptainOrAbove && !isEditingMyTeam && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                populateTeamEditFields(activeTeam)
+                                setIsEditingMyTeam(true)
+                                setMyTeamSaveMsg('')
+                              }}
+                              className="absolute top-3 right-3 px-3 py-1 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#FF6B00]/60 text-[#FF6B00] text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              Edit Team
+                            </button>
+                          )}
+
+                          {/* Team Circular Logo */}
+                          <div
+                            className="w-24 h-24 rounded-full bg-[#1C2228] flex items-center justify-center overflow-hidden shadow-xl mb-2.5 relative"
+                            style={{
+                              borderWidth: '3px',
+                              borderStyle: 'solid',
+                              borderColor: displayColor,
+                            }}
+                          >
+                            {displayLogo ? (
+                              <img
+                                src={displayLogo}
+                                alt={activeTeam.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <Shield
+                                className="w-11 h-11"
+                                style={{ color: displayColor }}
+                              />
+                            )}
+                          </div>
+
+                          {!isEditingMyTeam ? (
+                            <>
+                              <h2 className="font-display font-extrabold text-2xl tracking-wider text-white uppercase">
+                                {activeTeam.name}
+                              </h2>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span
+                                  className="w-3 h-3 rounded-full border border-white/40"
+                                  style={{ backgroundColor: activeTeam.colorHex }}
+                                />
+                                <span className="text-[11px] font-mono font-bold text-[#8A99AD] uppercase">
+                                  {activeTeam.colorHex}
+                                </span>
+                                <span className="text-[#2A323B]">•</span>
+                                <span className="text-[11px] font-bold text-[#FF6B00] uppercase">
+                                  {activeTeam.members.length}{' '}
+                                  {activeTeam.members.length === 1
+                                    ? 'Member'
+                                    : 'Members'}
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            /* ADMIN / TEAM CAPTAIN EDIT CONTROLS */
+                            <div className="w-full flex flex-col gap-2.5 mt-2">
+                              {/* Upload / Adjust Logo Controls */}
+                              <input
+                                ref={teamLogoInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handleLogoFileSelected}
+                                className="hidden"
+                              />
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => teamLogoInputRef.current?.click()}
+                                  className="px-3.5 py-1.5 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] text-xs font-extrabold uppercase tracking-wider text-[#FF6B00] flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <ImagePlus className="w-3.5 h-3.5" />
+                                  {teamLogoDataUrl ? 'Change Logo' : 'Upload Logo'}
+                                </button>
+                                {teamLogoDataUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRawLogoForCrop(teamLogoDataUrl)
+                                      setIsLogoCropModalOpen(true)
+                                    }}
+                                    className="px-3 py-1.5 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#38BDF8]/50 text-xs font-extrabold uppercase tracking-wider text-[#38BDF8] cursor-pointer"
+                                  >
+                                    Adjust Circle
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Edit Team Name */}
+                              <div className="w-full bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-10 px-4 flex items-center">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A99AD] mr-2 shrink-0">
+                                  NAME:
+                                </span>
+                                <input
+                                  type="text"
+                                  value={teamName}
+                                  onChange={(e) => setTeamName(e.target.value)}
+                                  placeholder="TEAM NAME"
+                                  className="w-full bg-transparent font-display font-extrabold text-base tracking-wider text-white uppercase focus:outline-none"
+                                />
+                              </div>
+
+                              {/* Edit Team HEX Color */}
+                              <div className="w-full bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-10 px-4 flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <Palette className="w-3.5 h-3.5 text-[#FF6B00]" />
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A99AD]">
+                                    HEX:
+                                  </span>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={teamColorHex}
+                                  maxLength={7}
+                                  onChange={(e) => setTeamColorHex(e.target.value)}
+                                  className="w-24 bg-[#14191E] border border-[#2A323B] rounded-lg px-2 py-0.5 text-xs font-mono font-bold text-white uppercase text-center focus:outline-none focus:border-[#FF6B00]"
+                                />
+                                <label
+                                  className="w-6 h-6 rounded-full border-2 border-white shadow cursor-pointer shrink-0 relative overflow-hidden"
+                                  style={{ backgroundColor: teamColorHex || '#FF6B00' }}
+                                >
+                                  <input
+                                    type="color"
+                                    value={
+                                      /^#[0-9A-Fa-f]{6}$/.test(teamColorHex)
+                                        ? teamColorHex
+                                        : '#FF6B00'
+                                    }
+                                    onChange={(e) =>
+                                      setTeamColorHex(e.target.value.toUpperCase())
+                                    }
+                                    className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* TEAM MEMBERS ROSTER SECTION */}
+                        <div className="bg-[#14191E]/80 border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col">
+                          <div className="flex items-center justify-between mb-2.5 px-1">
+                            <span className="font-display font-extrabold text-sm tracking-widest text-[#FF6B00] uppercase">
+                              TEAM MEMBERS
+                            </span>
+                            {isEffectiveCaptainOrAbove && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!isEditingMyTeam) {
+                                    populateTeamEditFields(activeTeam)
+                                    setIsEditingMyTeam(true)
+                                  }
+                                  setTeamRacerSearchQuery('')
+                                  setActiveView('my-team-manage-racers')
+                                }}
+                                className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#38BDF8]/50 text-[#38BDF8] flex items-center gap-1 cursor-pointer"
+                              >
+                                <UserPlus className="w-3 h-3" />
+                                Add / Manage Racers
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Member Rows */}
+                          {(() => {
+                            const displayedMembers = isEditingMyTeam
+                              ? leagueMembers
+                                  .filter((m) =>
+                                    selectedTeamDriverIds.includes(m.driverId)
+                                  )
+                                  .map((m) => ({
+                                    driverId: m.driverId,
+                                    displayName: m.displayName,
+                                    firstName: m.firstName,
+                                    surname: m.surname,
+                                    handle: m.handle,
+                                    driverNumber: m.driverNumber,
+                                    appRole: m.appRole,
+                                  }))
+                              : activeTeam.members
+
+                            if (displayedMembers.length === 0) {
+                              return (
+                                <div className="py-6 text-center text-xs text-[#8A99AD]">
+                                  No racers assigned to this team yet.
+                                </div>
+                              )
+                            }
+
+                            return (
+                              <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-0.5">
+                                {displayedMembers.map((member, idx) => {
+                                  const fullName =
+                                    `${member.firstName} ${member.surname}`.trim() ||
+                                    member.displayName ||
+                                    member.handle
+                                  const num = member.driverNumber || String(idx + 1)
+
+                                  return (
+                                    <div
+                                      key={member.driverId}
+                                      className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full h-11 px-4 flex items-center justify-between gap-2"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-display font-extrabold text-sm sm:text-base tracking-wider text-[#FF6B00] uppercase truncate">
+                                          {fullName.toUpperCase()} - {num}
+                                        </span>
+                                        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border border-[#2A323B] text-[#8A99AD] shrink-0">
+                                          {member.appRole}
+                                        </span>
+                                      </div>
+
+                                      {/* Admin / Team Captain Kick / Remove Teammate Button */}
+                                      {isEffectiveCaptainOrAbove && (
+                                        <button
+                                          type="button"
+                                          disabled={isCreatingTeam}
+                                          onClick={() => {
+                                            if (isEditingMyTeam) {
+                                              handleToggleTeamRacer(member.driverId)
+                                            } else {
+                                              handleKickTeamMemberDirect(
+                                                activeTeam,
+                                                member.driverId
+                                              )
+                                            }
+                                          }}
+                                          title="Kick / Remove from team"
+                                          className="px-2.5 py-1 rounded-full bg-[#dc2626]/15 hover:bg-[#dc2626] text-red-400 hover:text-white border border-red-800/50 text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1 transition shrink-0 cursor-pointer disabled:opacity-50"
+                                        >
+                                          <UserMinus className="w-3 h-3" />
+                                          <span>Kick</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })()}
+                        </div>
+
+                        {myTeamSaveMsg && (
+                          <div className="flex items-center gap-2 bg-[#38BDF8]/10 border border-[#38BDF8]/40 rounded-2xl p-2.5 text-xs text-[#38BDF8] font-semibold">
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                            <span>{myTeamSaveMsg}</span>
+                          </div>
+                        )}
+
+                        {teamCreateError && (
+                          <p className="text-xs text-red-400 text-center font-semibold">
+                            {teamCreateError}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Bottom Action Bar when Editing Team */}
+                      {isEditingMyTeam && (
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingMyTeam(false)
+                              populateTeamEditFields(activeTeam)
+                            }}
+                            className="bg-[#14191E] hover:bg-[#222930] border border-[#2A323B] hover:border-red-500/60 active:scale-[0.98] transition-all rounded-2xl h-12 flex items-center justify-center cursor-pointer"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider text-[#EF4444] uppercase">
+                              CANCEL
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isCreatingTeam}
+                            onClick={handleSaveMyTeamChanges}
+                            className="bg-[#FF6B00] hover:bg-[#ff7b1a] active:scale-[0.98] transition-all rounded-2xl h-12 flex items-center justify-center shadow-lg shadow-[#FF6B00]/20 cursor-pointer disabled:opacity-50"
+                          >
+                            <span className="font-display font-extrabold text-base tracking-wider text-black uppercase">
+                              {isCreatingTeam ? 'SAVING...' : 'SAVE CHANGES'}
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ================= 7C. MY TEAM — MANAGE RACERS PICKER ================= */}
+        {activeView === 'my-team-manage-racers' && selectedLeague && (
+          <div className="flex flex-col flex-1 w-full">
+            <TrackDayHeader
+              sectionTitle={selectedLeague.name}
+              sectionSubtitle="EDIT TEAM ROSTER"
+              onBack={() => setActiveView('my-team')}
+              onBellClick={handleOpenNotifications}
+              unreadNotificationsCount={unreadNotificationsCount}
+            />
+
+            <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-between">
+              <div className="flex flex-col flex-1">
+                <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center mb-1">
+                  MANAGE TEAM RACERS
+                </h2>
+                <p className="text-[11px] text-[#8A99AD] text-center mb-3">
+                  Tap members to add or kick them from{' '}
+                  <strong className="text-white">{teamName || 'YOUR TEAM'}</strong>
+                </p>
+
+                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-3">
+                  <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                  <input
+                    type="text"
+                    value={teamRacerSearchQuery}
+                    onChange={(e) => setTeamRacerSearchQuery(e.target.value)}
+                    placeholder="SEARCH NAME - NUMBER"
+                    className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
+                  />
+                </div>
+
+                <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-3 flex flex-col gap-2.5 overflow-y-auto max-h-80">
+                  {filteredTeamRacers.length > 0 ? (
+                    filteredTeamRacers.map((member, idx) => {
+                      const isSelected = selectedTeamDriverIds.includes(
+                        member.driverId
+                      )
+                      return (
+                        <button
+                          key={member.driverId}
+                          type="button"
+                          onClick={() => handleToggleTeamRacer(member.driverId)}
+                          className={`w-full rounded-full h-11 px-5 flex items-center justify-between transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-[#FF6B00] text-black border-2 border-white shadow-md shadow-[#FF6B00]/20'
+                              : 'bg-[#1C2228] hover:bg-[#242C35] text-[#FF6B00] border border-[#2A323B]'
+                          }`}
+                        >
+                          <span className="font-display font-extrabold text-base tracking-wider uppercase truncate">
+                            {formatMemberLabel(member, idx)}
+                          </span>
+                          <span
+                            className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ml-2 ${
+                              isSelected
+                                ? 'bg-black border-black text-[#FF6B00]'
+                                : 'border-[#8A99AD]'
+                            }`}
+                          >
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 stroke-[3.5]" />
+                            )}
+                          </span>
+                        </button>
+                      )
+                    })
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-xs text-[#8A99AD] text-center">
+                      No league members found.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('my-team')}
+                className="w-full mt-4 bg-[#FF6B00] hover:bg-[#ff7b1a] text-black font-display font-extrabold text-base tracking-wider uppercase h-12 rounded-full shadow-lg shadow-[#FF6B00]/20 transition cursor-pointer"
+              >
+                DONE ({selectedTeamDriverIds.length} IN TEAM)
+              </button>
             </div>
           </div>
         )}

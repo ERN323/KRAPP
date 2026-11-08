@@ -352,3 +352,85 @@ export async function createLeagueTeamInSupabase(input: {
 
   return String(data)
 }
+
+export interface LeagueTeamMember {
+  driverId: string
+  displayName: string
+  firstName: string
+  surname: string
+  handle: string
+  driverNumber: string
+  appRole: LeagueRole
+}
+
+export interface LeagueTeam {
+  id: string
+  name: string
+  colorHex: string
+  logoUrl: string | null
+  createdBy: string | null
+  isMyTeam: boolean
+  members: LeagueTeamMember[]
+  createdAt: string
+}
+
+export async function fetchLeagueTeamsWithRosters(
+  leagueId: string
+): Promise<LeagueTeam[]> {
+  const { data, error } = await supabase.rpc('fn_get_league_teams_with_rosters', {
+    p_league_id: leagueId,
+  })
+
+  if (error) {
+    console.warn('Error fetching league teams:', error.message)
+    return []
+  }
+
+  if (!Array.isArray(data)) return []
+
+  return data.map((row: Record<string, unknown>) => {
+    const rawMembers = Array.isArray(row.members) ? row.members : []
+    const members: LeagueTeamMember[] = rawMembers.map(
+      (m: Record<string, unknown>, idx: number) => ({
+        driverId: String(m.driver_id || ''),
+        displayName: String(m.display_name || 'DRIVER'),
+        firstName: String(m.first_name || ''),
+        surname: String(m.surname || ''),
+        handle: String(m.handle || '@driver'),
+        driverNumber: String(m.driver_number || String(idx + 1)),
+        appRole: normalizeAppRole(m.app_role as string | null),
+      })
+    )
+
+    return {
+      id: String(row.id),
+      name: String(row.name || 'TEAM'),
+      colorHex: String(row.color_hex || '#FF6B00'),
+      logoUrl: row.logo_url ? String(row.logo_url) : null,
+      createdBy: row.created_by ? String(row.created_by) : null,
+      isMyTeam: Boolean(row.is_my_team),
+      members,
+      createdAt: String(row.created_at || new Date().toISOString()),
+    }
+  })
+}
+
+export async function updateLeagueTeamInSupabase(input: {
+  teamId: string
+  name: string
+  colorHex: string
+  logoUrl: string | null
+  driverIds: string[]
+}): Promise<void> {
+  const { error } = await supabase.rpc('fn_update_team', {
+    p_team_id: input.teamId,
+    p_name: input.name.trim().toUpperCase(),
+    p_color_hex: input.colorHex.trim() || '#FF6B00',
+    p_logo_url: input.logoUrl,
+    p_driver_ids: input.driverIds,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
