@@ -30,6 +30,7 @@ import {
   MapPin,
   Navigation,
   ExternalLink,
+  Download,
 } from 'lucide-react'
 import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
@@ -556,6 +557,97 @@ export function App() {
       member.handle.replace(/^@/, '')
     const num = member.driverNumber.trim() || String(index + 1)
     return `${fullName.toUpperCase()} - ${num}`
+  }
+
+  // Build standardized Racer fields + combined "Driver ID" ("E.Adlers - 33") for Track Owners & CSV Export
+  const buildRacerExportData = (member: LeagueMemberItem, index: number) => {
+    const toTitleWords = (raw: string) =>
+      raw
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ')
+
+    let first = (member.firstName || '').trim()
+    let last = (member.surname || '').trim()
+
+    if (!first && !last) {
+      const fallbackFull = (
+        member.displayName || member.handle.replace(/^@/, '')
+      ).trim()
+      const parts = fallbackFull.split(/\s+/).filter(Boolean)
+      first = parts[0] || 'Driver'
+      last = parts.slice(1).join(' ')
+    }
+
+    const cleanName = toTitleWords(first)
+    const cleanSurname = toTitleWords(last)
+    const cleanNumber = (member.driverNumber || '').trim() || String(index + 1)
+    const teamFromRoster = leagueTeams.find((t) =>
+      t.members.some((m) => m.driverId === member.driverId)
+    )?.name
+    const cleanTeam = (member.teamName || teamFromRoster || '').trim()
+
+    // Format: [first letter of name].[surname] - [driver number] -> e.g. "E.Adlers - 33"
+    const firstInitial = cleanName ? cleanName.charAt(0).toUpperCase() : ''
+    const driverIdTrackFormat =
+      firstInitial && cleanSurname
+        ? `${firstInitial}.${cleanSurname} - ${cleanNumber}`
+        : `${cleanName || cleanSurname || 'Driver'} - ${cleanNumber}`
+
+    return {
+      name: cleanName,
+      surname: cleanSurname,
+      number: cleanNumber,
+      team: cleanTeam,
+      driverId: driverIdTrackFormat,
+    }
+  }
+
+  const handleExportLeagueRacersCsv = () => {
+    if (!selectedLeague || leagueMembers.length === 0) return
+
+    const escapeCsvField = (val: string) => {
+      const str = String(val ?? '')
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`
+      }
+      return str
+    }
+
+    const headers = ['Name', 'Surname', 'Number', 'Team', 'Driver ID']
+    const rows = leagueMembers.map((member, idx) => {
+      const row = buildRacerExportData(member, idx)
+      return [
+        escapeCsvField(row.name),
+        escapeCsvField(row.surname),
+        escapeCsvField(row.number),
+        escapeCsvField(row.team),
+        escapeCsvField(row.driverId),
+      ].join(',')
+    })
+
+    // Include UTF-8 BOM (\uFEFF) so Excel opens Latvian/Lithuanian characters accurately
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const safeLeagueSlug =
+      selectedLeague.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'league'
+    link.href = url
+    link.setAttribute('download', `${safeLeagueSlug}_racers.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    setManageRacerSuccessMsg(
+      `Exported ${leagueMembers.length} racers to ${safeLeagueSlug}_racers.csv!`
+    )
   }
 
   // Filtered league members for "ASSIGN ROLES" search box
@@ -2955,10 +3047,10 @@ export function App() {
                 MANAGE RACERS
               </h2>
 
-              {/* STEP 1: RACER LIST WITH SEARCH BAR */}
+              {/* STEP 1: RACER LIST WITH SEARCH BAR & EXPORT CSV FOR TRACK OWNERS */}
               {manageRacersStep === 'list' && (
                 <>
-                  <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-4 shadow-inner">
+                  <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-4 flex items-center gap-2 mb-3 shadow-inner">
                     <Search className="w-4 h-4 text-[#FF6B00] shrink-0" />
                     <input
                       type="text"
@@ -2969,6 +3061,26 @@ export function App() {
                     />
                   </div>
 
+                  {/* Export Racers CSV Button for Track Timing System */}
+                  <button
+                    type="button"
+                    disabled={loadingMembers || leagueMembers.length === 0}
+                    onClick={handleExportLeagueRacersCsv}
+                    className="w-full mb-3 bg-[#14191E] hover:bg-[#222930] border-2 border-[#38BDF8]/70 hover:border-[#38BDF8] active:scale-[0.99] transition-all rounded-full h-11 px-4 flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className="w-4 h-4 text-[#38BDF8] shrink-0" />
+                    <span className="font-display font-extrabold text-sm sm:text-base tracking-wider text-[#38BDF8] uppercase">
+                      EXPORT RACERS CSV ({leagueMembers.length})
+                    </span>
+                  </button>
+
+                  {manageRacerSuccessMsg && (
+                    <div className="mb-3 flex items-center gap-2 bg-[#38BDF8]/10 border border-[#38BDF8]/40 rounded-2xl p-2.5 text-xs text-[#38BDF8] font-semibold">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{manageRacerSuccessMsg}</span>
+                    </div>
+                  )}
+
                   <div className="flex-1 bg-[#14191E]/70 border-2 border-[#2A323B] rounded-3xl p-3.5 flex flex-col">
                     {loadingMembers ? (
                       <div className="flex-1 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
@@ -2976,50 +3088,70 @@ export function App() {
                       </div>
                     ) : filteredLeagueMembers.length > 0 ? (
                       <div className="flex flex-col gap-3 overflow-y-auto">
-                        {filteredLeagueMembers.map((member, idx) => (
-                          <button
-                            key={member.driverId}
-                            type="button"
-                            onClick={() => {
-                              setSelectedManagedRacer(member)
-                              setManageRacersStep('actions')
-                              setManageRacerSuccessMsg('')
-                              setManageRacerErrorMsg('')
-                            }}
-                            className="w-full bg-[#1C2228] hover:bg-[#242C35] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full min-h-[2.75rem] py-2 px-5 flex items-center justify-between gap-2 shadow-md cursor-pointer"
-                          >
-                            <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate">
-                              {formatMemberLabel(member, idx)}
-                            </span>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {member.teamName && (
-                                <span
-                                  className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border text-white flex items-center gap-1"
-                                  style={{
-                                    borderColor: member.teamColorHex || '#FF6B00',
-                                  }}
-                                >
+                        {filteredLeagueMembers.map((member, idx) => {
+                          const exportRow = buildRacerExportData(member, idx)
+                          const teamFromRoster = leagueTeams.find((t) =>
+                            t.members.some((m) => m.driverId === member.driverId)
+                          )
+                          const displayTeamName =
+                            member.teamName || teamFromRoster?.name || null
+                          const displayTeamColor =
+                            member.teamColorHex ||
+                            teamFromRoster?.colorHex ||
+                            '#FF6B00'
+
+                          return (
+                            <button
+                              key={member.driverId}
+                              type="button"
+                              onClick={() => {
+                                setSelectedManagedRacer(member)
+                                setManageRacersStep('actions')
+                                setManageRacerSuccessMsg('')
+                                setManageRacerErrorMsg('')
+                              }}
+                              className="w-full bg-[#1C2228] hover:bg-[#242C35] border border-[#2A323B] hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-2xl py-2.5 px-4 flex items-center justify-between gap-2 shadow-md cursor-pointer text-left"
+                            >
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate leading-tight">
+                                  {formatMemberLabel(member, idx)}
+                                </span>
+                                <span className="text-[11px] font-mono font-bold text-[#8A99AD] truncate">
+                                  Driver ID:{' '}
+                                  <strong className="text-white">
+                                    {exportRow.driverId}
+                                  </strong>
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {displayTeamName && (
                                   <span
-                                    className="w-1.5 h-1.5 rounded-full"
+                                    className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border text-white flex items-center gap-1"
                                     style={{
-                                      backgroundColor:
-                                        member.teamColorHex || '#FF6B00',
+                                      borderColor: displayTeamColor,
                                     }}
-                                  />
-                                  {member.teamName}
-                                </span>
-                              )}
-                              {member.tags?.map((tg) => (
-                                <span
-                                  key={tg}
-                                  className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#38BDF8]/15 border border-[#38BDF8]/40 text-[#38BDF8]"
-                                >
-                                  {tg}
-                                </span>
-                              ))}
-                            </div>
-                          </button>
-                        ))}
+                                  >
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full"
+                                      style={{
+                                        backgroundColor: displayTeamColor,
+                                      }}
+                                    />
+                                    {displayTeamName}
+                                  </span>
+                                )}
+                                {member.tags?.map((tg) => (
+                                  <span
+                                    key={tg}
+                                    className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#38BDF8]/15 border border-[#38BDF8]/40 text-[#38BDF8]"
+                                  >
+                                    {tg}
+                                  </span>
+                                ))}
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
