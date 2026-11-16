@@ -239,6 +239,8 @@ export function App() {
   const [isSchedulingRace, setIsSchedulingRace] = useState(false)
   const [scheduleRaceError, setScheduleRaceError] = useState('')
   const [racesYearFilter, setRacesYearFilter] = useState<string>('ALL')
+  const [racesTrackFilter, setRacesTrackFilter] = useState<string>('ALL')
+  const [isRacesFilterOpen, setIsRacesFilterOpen] = useState(false)
   const [loadingRaces, setLoadingRaces] = useState(false)
   const [selectedRaceForDetail, setSelectedRaceForDetail] =
     useState<LeagueRaceEvent | null>(null)
@@ -1132,6 +1134,8 @@ export function App() {
         setLeagueRaceEvents(refreshedEvents)
         fetchMyNotifications().then((loaded) => setNotifications(loaded))
         setRacesYearFilter('ALL')
+        setRacesTrackFilter('ALL')
+        setIsRacesFilterOpen(false)
         setActiveView('league-races')
       }
     } catch (err: unknown) {
@@ -1166,6 +1170,7 @@ export function App() {
 
   const handleOpenLeagueRaces = async () => {
     if (!selectedLeague) return
+    setIsRacesFilterOpen(false)
     setActiveView('league-races')
     setLoadingRaces(true)
     const events = await fetchLeagueEventsInSupabase(selectedLeague.id)
@@ -4226,78 +4231,218 @@ export function App() {
         {/* ================= 10C. LEAGUE RACES LIST SCREEN ================= */}
         {activeView === 'league-races' && selectedLeague && (
           <div className="flex flex-col flex-1 w-full">
-            {/* Custom Top Header matching Wireframe: BACK | RACES | YEAR PILL */}
-            <header className="px-5 pt-4 pb-3">
-              <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl px-4 py-3.5 flex items-center justify-between shadow-lg">
-                <button
-                  type="button"
-                  onClick={() => setActiveView('league-detail')}
-                  className="px-4 py-1.5 rounded-full bg-[#252D35] hover:bg-[#2E3842] border border-[#36414D] active:scale-95 transition cursor-pointer"
-                >
-                  <span className="font-display font-extrabold text-xs tracking-wider text-[#EF4444] uppercase">
-                    BACK
-                  </span>
-                </button>
+            {/* Custom Top Header: BACK | RACES | FILTER */}
+            {(() => {
+              const resolveRaceTrackLabel = (ev: LeagueRaceEvent): string => {
+                const matched =
+                  findKartingTrack(ev.trackSlug) ||
+                  findKartingTrack(ev.location) ||
+                  findKartingTrack(ev.name)
+                if (matched) return matched.name
+                return (ev.location || ev.name || 'UNKNOWN TRACK').toUpperCase()
+              }
 
-                <div className="text-center">
-                  <h1 className="font-display font-extrabold text-2xl tracking-wider text-[#FF6B00] uppercase leading-none">
-                    RACES
-                  </h1>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#8A99AD] block mt-0.5">
-                    {selectedLeague.name}
-                  </span>
-                </div>
+              const yearsSet = new Set<string>()
+              const tracksSet = new Set<string>()
+              leagueRaceEvents.forEach((ev) => {
+                if (ev.eventDate && ev.eventDate.length >= 4) {
+                  yearsSet.add(ev.eventDate.slice(0, 4))
+                }
+                tracksSet.add(resolveRaceTrackLabel(ev))
+              })
+              const availableYears = Array.from(yearsSet).sort((a, b) =>
+                b.localeCompare(a)
+              )
+              const availableTracks = Array.from(tracksSet).sort()
+              const hasActiveFilter =
+                racesYearFilter !== 'ALL' || racesTrackFilter !== 'ALL'
 
-                {/* Year Filter Pill — cycles between available years & ALL */}
-                {(() => {
-                  const yearsSet = new Set<string>(['2026'])
-                  leagueRaceEvents.forEach((ev) => {
-                    if (ev.eventDate && ev.eventDate.length >= 4) {
-                      yearsSet.add(ev.eventDate.slice(0, 4))
-                    }
-                  })
-                  const yearOptions = ['ALL', ...Array.from(yearsSet).sort()]
-                  const nextYearFilter = () => {
-                    const idx = yearOptions.indexOf(racesYearFilter)
-                    const next =
-                      yearOptions[(idx + 1) % yearOptions.length] || 'ALL'
-                    setRacesYearFilter(next)
-                  }
+              const filteredRaces = leagueRaceEvents.filter((ev) => {
+                const matchesYear =
+                  racesYearFilter === 'ALL' ||
+                  ev.eventDate.startsWith(racesYearFilter)
+                const matchesTrack =
+                  racesTrackFilter === 'ALL' ||
+                  resolveRaceTrackLabel(ev) === racesTrackFilter
+                return matchesYear && matchesTrack
+              })
 
-                  return (
-                    <button
-                      type="button"
-                      onClick={nextYearFilter}
-                      title="Tap to filter by year"
-                      className="px-4 py-1.5 rounded-full bg-[#252D35] hover:bg-[#2E3842] border border-[#36414D] active:scale-95 transition cursor-pointer"
-                    >
-                      <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase">
-                        {racesYearFilter === 'ALL' ? '2026' : racesYearFilter}
-                      </span>
-                    </button>
-                  )
-                })()}
-              </div>
-            </header>
+              return (
+                <>
+                  <header className="px-5 pt-4 pb-3 flex flex-col gap-2.5">
+                    <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl px-4 py-3.5 flex items-center justify-between shadow-lg">
+                      <button
+                        type="button"
+                        onClick={() => setActiveView('league-detail')}
+                        className="px-4 py-1.5 rounded-full bg-[#252D35] hover:bg-[#2E3842] border border-[#36414D] active:scale-95 transition cursor-pointer"
+                      >
+                        <span className="font-display font-extrabold text-xs tracking-wider text-[#EF4444] uppercase">
+                          BACK
+                        </span>
+                      </button>
 
-            <div className="px-5 flex-1 flex flex-col gap-3.5 overflow-y-auto pb-2">
-              {loadingRaces ? (
-                <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-3xl p-8 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
-                  Loading scheduled races...
-                </div>
-              ) : (
-                (() => {
-                  const filteredRaces =
-                    racesYearFilter === 'ALL'
-                      ? leagueRaceEvents
-                      : leagueRaceEvents.filter((ev) =>
-                          ev.eventDate.startsWith(racesYearFilter)
-                        )
-                  const displayedRaces =
-                    filteredRaces.length > 0 ? filteredRaces : leagueRaceEvents
+                      <div className="text-center">
+                        <h1 className="font-display font-extrabold text-2xl tracking-wider text-[#FF6B00] uppercase leading-none">
+                          RACES
+                        </h1>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-[#8A99AD] block mt-0.5">
+                          {selectedLeague.name}
+                        </span>
+                      </div>
 
-                  if (displayedRaces.length === 0) {
-                    return (
+                      {/* FILTER Pill Button */}
+                      <button
+                        type="button"
+                        onClick={() => setIsRacesFilterOpen((o) => !o)}
+                        className={`px-4 py-1.5 rounded-full border active:scale-95 transition flex items-center gap-1.5 cursor-pointer ${
+                          isRacesFilterOpen || hasActiveFilter
+                            ? 'bg-[#FF6B00] border-white text-black shadow-md shadow-[#FF6B00]/20'
+                            : 'bg-[#252D35] hover:bg-[#2E3842] border-[#36414D] text-[#FF6B00]'
+                        }`}
+                      >
+                        <span className="font-display font-extrabold text-xs tracking-wider uppercase">
+                          FILTER
+                        </span>
+                        {hasActiveFilter && (
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              isRacesFilterOpen ? 'bg-black' : 'bg-[#38BDF8]'
+                            }`}
+                          />
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Expandable Filter Panel: Filter by Year or by Tracks in this League */}
+                    {isRacesFilterOpen && (
+                      <div className="w-full bg-[#1C2228] border-2 border-[#FF6B00]/70 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-[#2A323B] pb-2">
+                          <span className="font-display font-extrabold text-sm tracking-wider text-[#FF6B00] uppercase">
+                            FILTER RACES
+                          </span>
+                          {hasActiveFilter && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRacesYearFilter('ALL')
+                                setRacesTrackFilter('ALL')
+                              }}
+                              className="text-[10px] font-extrabold uppercase tracking-wider text-[#38BDF8] hover:underline cursor-pointer"
+                            >
+                              Reset Filters
+                            </button>
+                          )}
+                        </div>
+
+                        {/* 1. Filter by Year */}
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#8A99AD]">
+                            BY YEAR
+                          </span>
+                          <div className="flex items-center flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setRacesYearFilter('ALL')}
+                              className={`px-3.5 py-1.5 rounded-full font-display font-extrabold text-xs tracking-wider uppercase transition cursor-pointer ${
+                                racesYearFilter === 'ALL'
+                                  ? 'bg-[#FF6B00] text-black border border-white'
+                                  : 'bg-[#14191E] hover:bg-[#252D35] text-white border border-[#2A323B]'
+                              }`}
+                            >
+                              ALL YEARS
+                            </button>
+                            {availableYears.map((yr) => (
+                              <button
+                                key={yr}
+                                type="button"
+                                onClick={() => setRacesYearFilter(yr)}
+                                className={`px-3.5 py-1.5 rounded-full font-display font-extrabold text-xs tracking-wider uppercase transition cursor-pointer ${
+                                  racesYearFilter === yr
+                                    ? 'bg-[#FF6B00] text-black border border-white'
+                                    : 'bg-[#14191E] hover:bg-[#252D35] text-white border border-[#2A323B]'
+                                }`}
+                              >
+                                {yr}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 2. Filter by Tracks in this League */}
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#8A99AD]">
+                            BY TRACK IN THIS LEAGUE
+                          </span>
+                          {availableTracks.length > 0 ? (
+                            <div className="flex items-center flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setRacesTrackFilter('ALL')}
+                                className={`px-3.5 py-1.5 rounded-full font-display font-extrabold text-xs tracking-wider uppercase transition cursor-pointer ${
+                                  racesTrackFilter === 'ALL'
+                                    ? 'bg-[#FF6B00] text-black border border-white'
+                                    : 'bg-[#14191E] hover:bg-[#252D35] text-white border border-[#2A323B]'
+                                }`}
+                              >
+                                ALL TRACKS
+                              </button>
+                              {availableTracks.map((trk) => (
+                                <button
+                                  key={trk}
+                                  type="button"
+                                  onClick={() => setRacesTrackFilter(trk)}
+                                  className={`px-3.5 py-1.5 rounded-full font-display font-extrabold text-xs tracking-wider uppercase transition cursor-pointer ${
+                                    racesTrackFilter === trk
+                                      ? 'bg-[#FF6B00] text-black border border-white'
+                                      : 'bg-[#14191E] hover:bg-[#252D35] text-white border border-[#2A323B]'
+                                  }`}
+                                >
+                                  {trk}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-[#8A99AD]">
+                              No tracks scheduled in this league yet.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Active filter summary strip when filter panel is closed */}
+                    {!isRacesFilterOpen && hasActiveFilter && (
+                      <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-full px-4 py-1.5 flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider">
+                        <span className="text-[#8A99AD] truncate">
+                          Active Filter:{' '}
+                          <strong className="text-[#FF6B00]">
+                            {racesYearFilter !== 'ALL' ? racesYearFilter : 'All Years'}
+                            {' · '}
+                            {racesTrackFilter !== 'ALL'
+                              ? racesTrackFilter
+                              : 'All Tracks'}
+                          </strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRacesYearFilter('ALL')
+                            setRacesTrackFilter('ALL')
+                          }}
+                          className="text-[#38BDF8] hover:underline shrink-0 ml-2 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </header>
+
+                  <div className="px-5 flex-1 flex flex-col gap-3.5 overflow-y-auto pb-2">
+                    {loadingRaces ? (
+                      <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-3xl p-8 flex items-center justify-center text-xs font-bold uppercase tracking-wider text-[#8A99AD]">
+                        Loading scheduled races...
+                      </div>
+                    ) : leagueRaceEvents.length === 0 ? (
                       <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-3xl p-6 flex flex-col items-center justify-center text-center shadow-lg">
                         <Flag className="w-10 h-10 text-[#FF6B00] mb-3" />
                         <h2 className="font-display font-extrabold text-xl tracking-wider text-white uppercase mb-1">
@@ -4316,81 +4461,113 @@ export function App() {
                           </button>
                         )}
                       </div>
-                    )
-                  }
-
-                  return displayedRaces.map((race) => {
-                    const formattedDate = race.eventDate
-                      ? race.eventDate.split('-').reverse().join('.')
-                      : 'TBA'
-                    const top1 = race.top3Names?.[0] || 'To be known'
-                    const top2 = race.top3Names?.[1] || 'To be known'
-                    const top3 = race.top3Names?.[2] || 'To be known'
-
-                    return (
-                      <div
-                        key={race.id}
-                        className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-3 shadow-lg"
-                      >
-                        {/* Top Inner Pill: Race Title & Date */}
-                        <div className="w-full bg-[#2A323B]/80 border border-[#36414D] rounded-2xl py-2 px-4 flex flex-col items-center justify-center text-center">
-                          <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase leading-tight">
-                            {race.name}
-                          </span>
-                          <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] leading-tight">
-                            {formattedDate}
-                            {race.eventTime ? ` · ${race.eventTime}` : ''}
-                            {race.trackConfig
-                              ? ` · CONFIG ${race.trackConfig}`
-                              : ''}
-                          </span>
-                        </div>
-
-                        {/* Bottom Row: Top 3 Racers on Left + SEE MORE Button on Right */}
-                        <div className="flex items-center justify-between px-2 pb-1 gap-3">
-                          <div className="flex flex-col gap-0.5 text-sm font-bold text-white min-w-0">
-                            <span className="truncate">1. {top1}</span>
-                            <span className="truncate">2. {top2}</span>
-                            <span className="truncate">3. {top3}</span>
-                          </div>
-
-                          <div className="flex flex-col items-end gap-1.5 shrink-0">
-                            {race.myRsvp && (
-                              <span
-                                className={`text-[9px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
-                                  race.myRsvp === 'PARTICIPATE'
-                                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] border-[#FF6B00]/40'
-                                    : 'bg-red-500/15 text-red-400 border-red-500/40'
-                                }`}
-                              >
-                                {race.myRsvp === 'PARTICIPATE'
-                                  ? 'GOING'
-                                  : 'PASS'}
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedRaceForDetail(race)
-                                setIsChangingRaceRsvp(false)
-                                setConfirmDeleteRaceId(null)
-                                setIsDirectionsOpen(false)
-                                setActiveView('league-race-detail')
-                              }}
-                              className="px-5 py-1.5 rounded-full bg-[#2A323B] hover:bg-[#36414D] border border-[#FF6B00]/50 active:scale-95 transition cursor-pointer"
-                            >
-                              <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase">
-                                SEE MORE
-                              </span>
-                            </button>
-                          </div>
-                        </div>
+                    ) : filteredRaces.length === 0 ? (
+                      <div className="flex-1 bg-[#1C2228] border border-[#2A323B] rounded-3xl p-6 flex flex-col items-center justify-center text-center shadow-lg">
+                        <Flag className="w-9 h-9 text-[#8A99AD] mb-2.5" />
+                        <h2 className="font-display font-extrabold text-lg tracking-wider text-white uppercase mb-1">
+                          NO RACES MATCH FILTER
+                        </h2>
+                        <p className="text-xs text-[#8A99AD] max-w-xs mb-4">
+                          No races found for{' '}
+                          <strong className="text-white">
+                            {racesYearFilter === 'ALL'
+                              ? 'All Years'
+                              : racesYearFilter}
+                          </strong>{' '}
+                          at{' '}
+                          <strong className="text-white">
+                            {racesTrackFilter === 'ALL'
+                              ? 'All Tracks'
+                              : racesTrackFilter}
+                          </strong>
+                          .
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRacesYearFilter('ALL')
+                            setRacesTrackFilter('ALL')
+                          }}
+                          className="px-5 py-2 rounded-full bg-[#FF6B00] hover:bg-[#ff7b1a] text-black font-display font-extrabold text-xs tracking-wider uppercase transition cursor-pointer"
+                        >
+                          RESET FILTERS
+                        </button>
                       </div>
-                    )
-                  })
-                })()
-              )}
-            </div>
+                    ) : (
+                      filteredRaces.map((race) => {
+                        const formattedDate = race.eventDate
+                          ? race.eventDate.split('-').reverse().join('.')
+                          : 'TBA'
+                        const top1 = race.top3Names?.[0] || 'To be known'
+                        const top2 = race.top3Names?.[1] || 'To be known'
+                        const top3 = race.top3Names?.[2] || 'To be known'
+
+                        return (
+                          <div
+                            key={race.id}
+                            className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-3 shadow-lg"
+                          >
+                            {/* Top Inner Pill: Race Title & Date */}
+                            <div className="w-full bg-[#2A323B]/80 border border-[#36414D] rounded-2xl py-2 px-4 flex flex-col items-center justify-center text-center">
+                              <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase leading-tight">
+                                {race.name}
+                              </span>
+                              <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] leading-tight">
+                                {formattedDate}
+                                {race.eventTime ? ` · ${race.eventTime}` : ''}
+                                {race.trackConfig
+                                  ? ` · CONFIG ${race.trackConfig}`
+                                  : ''}
+                              </span>
+                            </div>
+
+                            {/* Bottom Row: Top 3 Racers on Left + SEE MORE Button on Right */}
+                            <div className="flex items-center justify-between px-2 pb-1 gap-3">
+                              <div className="flex flex-col gap-0.5 text-sm font-bold text-white min-w-0">
+                                <span className="truncate">1. {top1}</span>
+                                <span className="truncate">2. {top2}</span>
+                                <span className="truncate">3. {top3}</span>
+                              </div>
+
+                              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                {race.myRsvp && (
+                                  <span
+                                    className={`text-[9px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
+                                      race.myRsvp === 'PARTICIPATE'
+                                        ? 'bg-[#FF6B00]/15 text-[#FF6B00] border-[#FF6B00]/40'
+                                        : 'bg-red-500/15 text-red-400 border-red-500/40'
+                                    }`}
+                                  >
+                                    {race.myRsvp === 'PARTICIPATE'
+                                      ? 'GOING'
+                                      : 'PASS'}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedRaceForDetail(race)
+                                    setIsChangingRaceRsvp(false)
+                                    setConfirmDeleteRaceId(null)
+                                    setIsDirectionsOpen(false)
+                                    setActiveView('league-race-detail')
+                                  }}
+                                  className="px-5 py-1.5 rounded-full bg-[#2A323B] hover:bg-[#36414D] border border-[#FF6B00]/50 active:scale-95 transition cursor-pointer"
+                                >
+                                  <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase">
+                                    SEE MORE
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </>
+              )
+            })()}
           </div>
         )}
 
