@@ -46,6 +46,9 @@ export interface LeagueRaceEvent {
   id: string
   name: string
   location: string
+  trackConfig: string
+  trackAddress: string
+  trackSlug: string
   eventDate: string
   eventTime: string
   roundNo: number
@@ -599,6 +602,9 @@ export async function fetchLeagueEventsInSupabase(
       id: String(r.id),
       name: String(r.name || 'Race'),
       location: String(r.name || ''),
+      trackConfig: 'A',
+      trackAddress: '',
+      trackSlug: '',
       eventDate: String(r.event_date || ''),
       eventTime: '19:00',
       roundNo: Number(r.round_no || 1),
@@ -612,6 +618,9 @@ export async function fetchLeagueEventsInSupabase(
     id: String(r.id),
     name: String(r.name || 'Race'),
     location: String(r.location || r.name || ''),
+    trackConfig: String(r.track_config || 'A').toUpperCase(),
+    trackAddress: String(r.track_address || ''),
+    trackSlug: String(r.track_slug || ''),
     eventDate: String(r.event_date || ''),
     eventTime: String(r.event_time || '19:00'),
     roundNo: Number(r.round_no || 1),
@@ -632,20 +641,75 @@ export async function scheduleLeagueRaceInSupabase(input: {
   eventDate: string
   eventTime: string
   location: string
+  trackConfig?: string
+  trackAddress?: string
+  trackSlug?: string
 }): Promise<string> {
   const { data, error } = await supabase.rpc('fn_schedule_race', {
     p_league_id: input.leagueId,
-    p_name: input.name.trim().toUpperCase(),
+    p_name: input.name.trim(),
     p_event_date: input.eventDate,
     p_event_time: input.eventTime.trim() || '19:00',
-    p_location: input.location.trim().toUpperCase(),
+    p_location: input.location.trim(),
+    p_track_config: (input.trackConfig || 'A').trim().toUpperCase(),
+    p_track_address: (input.trackAddress || '').trim(),
+    p_track_slug: (input.trackSlug || '').trim().toLowerCase(),
+  })
+
+  if (error) {
+    // Fallback to 5-argument call if the 8-argument migration has not been run yet
+    const fallback = await supabase.rpc('fn_schedule_race', {
+      p_league_id: input.leagueId,
+      p_name: input.name.trim(),
+      p_event_date: input.eventDate,
+      p_event_time: input.eventTime.trim() || '19:00',
+      p_location: input.location.trim(),
+    })
+    if (fallback.error) {
+      throw new Error(fallback.error.message)
+    }
+    return String(fallback.data)
+  }
+
+  return String(data)
+}
+
+export async function updateLeagueRaceInSupabase(input: {
+  eventId: string
+  name: string
+  eventDate: string
+  eventTime: string
+  location: string
+  trackConfig?: string
+  trackAddress?: string
+  trackSlug?: string
+}): Promise<void> {
+  const { error } = await supabase.rpc('fn_update_race', {
+    p_event_id: input.eventId,
+    p_name: input.name.trim(),
+    p_event_date: input.eventDate,
+    p_event_time: input.eventTime.trim() || '19:00',
+    p_location: input.location.trim(),
+    p_track_config: (input.trackConfig || 'A').trim().toUpperCase(),
+    p_track_address: (input.trackAddress || '').trim(),
+    p_track_slug: (input.trackSlug || '').trim().toLowerCase(),
   })
 
   if (error) {
     throw new Error(error.message)
   }
+}
 
-  return String(data)
+export async function deleteLeagueRaceInSupabase(
+  eventId: string
+): Promise<void> {
+  const { error } = await supabase.rpc('fn_delete_race', {
+    p_event_id: eventId,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
 }
 
 export async function setRaceRsvpInSupabase(

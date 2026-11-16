@@ -28,6 +28,8 @@ import {
   ChevronRight,
   Clock,
   MapPin,
+  Navigation,
+  ExternalLink,
 } from 'lucide-react'
 import { Session } from '@supabase/supabase-js'
 import { DriverProfile, ProfileModal } from './components/ProfileModal'
@@ -36,6 +38,14 @@ import { COUNTRIES, CountryFlagCircle } from './components/CountryFlags'
 import { TrackDayHeader, CardGraphicSvg } from './components/TrackDayTheme'
 import { AuthScreen } from './components/AuthScreen'
 import { LogoCropModal } from './components/LogoCropModal'
+import {
+  KartingTrackInfo,
+  TrackConfigCode,
+  filterKartingTracks,
+  findKartingTrack,
+  getTrackSvgUrl,
+  getTrackNavigationLinks,
+} from './components/KartingTracks'
 import {
   supabase,
   League,
@@ -64,6 +74,8 @@ import {
   fetchLeagueEventsInSupabase,
   assignDriverPenaltyInSupabase,
   scheduleLeagueRaceInSupabase,
+  updateLeagueRaceInSupabase,
+  deleteLeagueRaceInSupabase,
   setRaceRsvpInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
@@ -217,6 +229,13 @@ export function App() {
   const [scheduleRaceTime, setScheduleRaceTime] = useState('19:00')
   const [scheduleRaceLocation, setScheduleRaceLocation] = useState('')
   const [scheduleRaceTitle, setScheduleRaceTitle] = useState('')
+  const [selectedScheduleTrack, setSelectedScheduleTrack] =
+    useState<KartingTrackInfo | null>(null)
+  const [scheduleTrackConfig, setScheduleTrackConfig] =
+    useState<TrackConfigCode>('A')
+  const [isTrackDropdownOpen, setIsTrackDropdownOpen] = useState(false)
+  const [trackSearchQuery, setTrackSearchQuery] = useState('')
+  const [isDirectionsOpen, setIsDirectionsOpen] = useState(false)
   const [isSchedulingRace, setIsSchedulingRace] = useState(false)
   const [scheduleRaceError, setScheduleRaceError] = useState('')
   const [racesYearFilter, setRacesYearFilter] = useState<string>('ALL')
@@ -225,6 +244,11 @@ export function App() {
     useState<LeagueRaceEvent | null>(null)
   const [isChangingRaceRsvp, setIsChangingRaceRsvp] = useState(false)
   const [savingRaceRsvp, setSavingRaceRsvp] = useState(false)
+  const [editingRaceId, setEditingRaceId] = useState<string | null>(null)
+  const [confirmDeleteRaceId, setConfirmDeleteRaceId] = useState<string | null>(
+    null
+  )
+  const [isDeletingRace, setIsDeletingRace] = useState(false)
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -993,24 +1017,75 @@ export function App() {
     const yyyy = now.getFullYear()
     const mm = now.getMonth()
     const dd = String(now.getDate()).padStart(2, '0')
+    setEditingRaceId(null)
     setScheduleCalendarYear(yyyy)
     setScheduleCalendarMonth(mm)
     setScheduleRaceDate(`${yyyy}-${String(mm + 1).padStart(2, '0')}-${dd}`)
     setScheduleRaceTime('19:00')
     setScheduleRaceLocation('')
     setScheduleRaceTitle('')
+    setSelectedScheduleTrack(null)
+    setScheduleTrackConfig('A')
+    setIsTrackDropdownOpen(false)
+    setTrackSearchQuery('')
     setScheduleRaceError('')
+    setActiveView('schedule-race')
+  }
+
+  const handleOpenEditRace = (race: LeagueRaceEvent) => {
+    if (!selectedLeague) return
+    setEditingRaceId(race.id)
+    const parts = (race.eventDate || '').split('-')
+    const parsedYear =
+      parts.length === 3 ? parseInt(parts[0], 10) : new Date().getFullYear()
+    const parsedMonth =
+      parts.length === 3 ? parseInt(parts[1], 10) - 1 : new Date().getMonth()
+    setScheduleCalendarYear(
+      Number.isNaN(parsedYear) ? new Date().getFullYear() : parsedYear
+    )
+    setScheduleCalendarMonth(
+      Number.isNaN(parsedMonth) ? new Date().getMonth() : parsedMonth
+    )
+    setScheduleRaceDate(
+      race.eventDate || new Date().toISOString().slice(0, 10)
+    )
+    setScheduleRaceTime(race.eventTime || '19:00')
+
+    const matchedTrack =
+      findKartingTrack(race.trackSlug) ||
+      findKartingTrack(race.location) ||
+      findKartingTrack(race.name)
+
+    setSelectedScheduleTrack(matchedTrack)
+    setScheduleTrackConfig(
+      ((race.trackConfig || 'A').toUpperCase() as TrackConfigCode) || 'A'
+    )
+    setScheduleRaceLocation(
+      matchedTrack ? matchedTrack.name : race.location || race.name
+    )
+    setScheduleRaceTitle(race.name)
+    setIsTrackDropdownOpen(false)
+    setTrackSearchQuery('')
+    setScheduleRaceError('')
+    setConfirmDeleteRaceId(null)
     setActiveView('schedule-race')
   }
 
   const handleConfirmScheduleRace = async () => {
     if (!selectedLeague) return
-    const cleanTitle = scheduleRaceTitle.trim() || scheduleRaceLocation.trim()
-    const cleanLocation = scheduleRaceLocation.trim() || cleanTitle
-    if (!cleanTitle) {
-      setScheduleRaceError('Please enter a race title or location')
+    if (!selectedScheduleTrack && !scheduleRaceLocation.trim()) {
+      setScheduleRaceError('Please select a track location from the dropdown')
       return
     }
+    const cleanLocation = selectedScheduleTrack
+      ? selectedScheduleTrack.name
+      : scheduleRaceLocation.trim()
+    const cleanTitle = scheduleRaceTitle.trim() || cleanLocation
+    const cleanAddress = selectedScheduleTrack
+      ? selectedScheduleTrack.address
+      : ''
+    const cleanSlug = selectedScheduleTrack ? selectedScheduleTrack.slug : ''
+
     if (!scheduleRaceDate) {
       setScheduleRaceError('Please select a date on the calendar')
       return
@@ -1019,26 +1094,73 @@ export function App() {
     setIsSchedulingRace(true)
     setScheduleRaceError('')
     try {
-      await scheduleLeagueRaceInSupabase({
-        leagueId: selectedLeague.id,
-        name: cleanTitle,
-        location: cleanLocation,
-        eventDate: scheduleRaceDate,
-        eventTime: scheduleRaceTime.trim() || '19:00',
-      })
+      if (editingRaceId) {
+        await updateLeagueRaceInSupabase({
+          eventId: editingRaceId,
+          name: cleanTitle,
+          location: cleanLocation,
+          trackConfig: scheduleTrackConfig,
+          trackAddress: cleanAddress,
+          trackSlug: cleanSlug,
+          eventDate: scheduleRaceDate,
+          eventTime: scheduleRaceTime.trim() || '19:00',
+        })
+        const refreshedEvents = await fetchLeagueEventsInSupabase(
+          selectedLeague.id
+        )
+        setLeagueRaceEvents(refreshedEvents)
+        const updatedRace =
+          refreshedEvents.find((r) => r.id === editingRaceId) || null
+        setSelectedRaceForDetail(updatedRace)
+        setEditingRaceId(null)
+        fetchMyNotifications().then((loaded) => setNotifications(loaded))
+        setActiveView(updatedRace ? 'league-race-detail' : 'league-races')
+      } else {
+        await scheduleLeagueRaceInSupabase({
+          leagueId: selectedLeague.id,
+          name: cleanTitle,
+          location: cleanLocation,
+          trackConfig: scheduleTrackConfig,
+          trackAddress: cleanAddress,
+          trackSlug: cleanSlug,
+          eventDate: scheduleRaceDate,
+          eventTime: scheduleRaceTime.trim() || '19:00',
+        })
+        const refreshedEvents = await fetchLeagueEventsInSupabase(
+          selectedLeague.id
+        )
+        setLeagueRaceEvents(refreshedEvents)
+        fetchMyNotifications().then((loaded) => setNotifications(loaded))
+        setRacesYearFilter('ALL')
+        setActiveView('league-races')
+      }
+    } catch (err: unknown) {
+      setScheduleRaceError(
+        err instanceof Error ? err.message : 'Failed to save race'
+      )
+    } finally {
+      setIsSchedulingRace(false)
+    }
+  }
+
+  const handleDeleteRace = async (eventId: string) => {
+    if (!selectedLeague) return
+    setIsDeletingRace(true)
+    try {
+      await deleteLeagueRaceInSupabase(eventId)
       const refreshedEvents = await fetchLeagueEventsInSupabase(
         selectedLeague.id
       )
       setLeagueRaceEvents(refreshedEvents)
+      setSelectedRaceForDetail(null)
+      setEditingRaceId(null)
+      setConfirmDeleteRaceId(null)
       fetchMyNotifications().then((loaded) => setNotifications(loaded))
-      setRacesYearFilter('ALL')
       setActiveView('league-races')
     } catch (err: unknown) {
-      setScheduleRaceError(
-        err instanceof Error ? err.message : 'Failed to schedule race'
-      )
+      alert(err instanceof Error ? err.message : 'Failed to delete race')
     } finally {
-      setIsSchedulingRace(false)
+      setIsDeletingRace(false)
     }
   }
 
@@ -3710,13 +3832,19 @@ export function App() {
           </div>
         )}
 
-        {/* ================= 10B. SCHEDULE RACE SCREEN (Admin Only) ================= */}
+        {/* ================= 10B. SCHEDULE / EDIT RACE SCREEN (Admin Only) ================= */}
         {activeView === 'schedule-race' && selectedLeague && (
           <div className="flex flex-col flex-1 w-full">
             <TrackDayHeader
               sectionTitle={selectedLeague.name}
-              sectionSubtitle="SETTINGS"
-              onBack={() => setActiveView('league-options')}
+              sectionSubtitle={editingRaceId ? 'EDIT RACE' : 'SETTINGS'}
+              onBack={() =>
+                setActiveView(
+                  editingRaceId && selectedRaceForDetail
+                    ? 'league-race-detail'
+                    : 'league-options'
+                )
+              }
               onBellClick={handleOpenNotifications}
               unreadNotificationsCount={unreadNotificationsCount}
             />
@@ -3724,7 +3852,7 @@ export function App() {
             <div className="mx-5 flex-1 bg-[#1C2228] border-2 border-[#2A323B] rounded-3xl p-4 flex flex-col justify-between gap-3.5 shadow-2xl">
               <div className="flex flex-col gap-3">
                 <h2 className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase text-center">
-                  SCHEDULE RACE
+                  {editingRaceId ? 'EDIT SCHEDULED RACE' : 'SCHEDULE RACE'}
                 </h2>
 
                 {/* 1. DATE CALENDAR CARD */}
@@ -3888,17 +4016,172 @@ export function App() {
                   />
                 </div>
 
-                {/* 4. LOCATION PILL */}
-                <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-12 px-5 flex items-center justify-between gap-2 shadow-inner">
-                  <MapPin className="w-4 h-4 text-[#FF6B00] shrink-0" />
-                  <input
-                    type="text"
-                    value={scheduleRaceLocation}
-                    onChange={(e) => setScheduleRaceLocation(e.target.value)}
-                    placeholder="LOCATION"
-                    className="w-full bg-transparent text-center font-display font-extrabold text-base tracking-wider text-white placeholder-[#FF6B00] uppercase focus:outline-none pr-4"
-                  />
+                {/* 4. LOCATION SEARCHABLE DROPDOWN (7 OFFICIAL KARTING TRACKS) */}
+                <div className="relative w-full">
+                  <button
+                    type="button"
+                    onClick={() => setIsTrackDropdownOpen((o) => !o)}
+                    className="w-full bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] focus:border-[#FF6B00] rounded-full h-12 px-5 flex items-center justify-between gap-2 shadow-inner cursor-pointer transition"
+                  >
+                    <MapPin className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                    <span
+                      className={`font-display font-extrabold text-sm sm:text-base tracking-wider uppercase truncate ${
+                        selectedScheduleTrack
+                          ? 'text-white'
+                          : 'text-[#FF6B00]'
+                      }`}
+                    >
+                      {selectedScheduleTrack
+                        ? `${selectedScheduleTrack.name} (CONFIG ${scheduleTrackConfig})`
+                        : 'SELECT TRACK LOCATION'}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-[#FF6B00] shrink-0 transition-transform ${
+                        isTrackDropdownOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {isTrackDropdownOpen && (
+                    <div className="mt-2 w-full bg-[#14191E] border-2 border-[#FF6B00]/70 rounded-3xl p-3 shadow-2xl z-30 flex flex-col gap-2">
+                      {/* Search bar inside dropdown */}
+                      <div className="w-full bg-[#1C2228] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-10 px-3.5 flex items-center gap-2">
+                        <Search className="w-3.5 h-3.5 text-[#FF6B00] shrink-0" />
+                        <input
+                          type="text"
+                          value={trackSearchQuery}
+                          onChange={(e) => setTrackSearchQuery(e.target.value)}
+                          placeholder="Search track or address..."
+                          autoFocus
+                          className="w-full bg-transparent text-xs font-bold text-white placeholder-[#8A99AD] focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Track options list */}
+                      <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5 pr-0.5">
+                        {filterKartingTracks(trackSearchQuery).map((track) => {
+                          const isSelected =
+                            selectedScheduleTrack?.slug === track.slug
+                          return (
+                            <button
+                              key={track.slug}
+                              type="button"
+                              onClick={() => {
+                                setSelectedScheduleTrack(track)
+                                setScheduleRaceLocation(track.name)
+                                if (
+                                  !track.configurations.includes(
+                                    scheduleTrackConfig
+                                  )
+                                ) {
+                                  setScheduleTrackConfig(
+                                    track.configurations[0] || 'A'
+                                  )
+                                }
+                                if (!scheduleRaceTitle.trim()) {
+                                  setScheduleRaceTitle(track.name)
+                                }
+                                setIsTrackDropdownOpen(false)
+                              }}
+                              className={`w-full text-left rounded-2xl p-2.5 border transition cursor-pointer flex flex-col gap-0.5 ${
+                                isSelected
+                                  ? 'bg-[#FF6B00]/15 border-[#FF6B00] text-white'
+                                  : 'bg-[#1C2228] hover:bg-[#242C35] border-[#2A323B] text-white'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-display font-extrabold text-sm tracking-wider text-[#FF6B00] uppercase">
+                                  {track.name}
+                                </span>
+                                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border border-[#2A323B] text-[#38BDF8] shrink-0">
+                                  Configs: {track.configurations.join(', ')}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-[#8A99AD] leading-snug">
+                                {track.address}
+                              </span>
+                            </button>
+                          )
+                        })}
+                        {filterKartingTracks(trackSearchQuery).length === 0 && (
+                          <div className="py-4 text-center text-xs text-[#8A99AD]">
+                            No matching tracks found.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* 5. AUTOMATIC TRACK PREVIEW & CONFIGURATION SELECTOR (A, B, C, D, E, F) */}
+                {selectedScheduleTrack && (
+                  <div className="w-full bg-[#14191E] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col items-center text-center gap-2 shadow-inner">
+                    <div className="flex flex-col items-center">
+                      <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#38BDF8]">
+                        SELECTED TRACK & CONFIGURATION
+                      </span>
+                      <span className="font-display font-extrabold text-base tracking-wider text-white uppercase">
+                        {selectedScheduleTrack.name} — CONFIG{' '}
+                        <span className="text-[#FF6B00]">
+                          {scheduleTrackConfig}
+                        </span>
+                      </span>
+                      <span className="text-[11px] text-[#8A99AD] mt-0.5">
+                        {selectedScheduleTrack.address}
+                      </span>
+                    </div>
+
+                    {/* Live Animated Track Configuration SVG */}
+                    <div className="w-full h-36 bg-[#1C2228] border border-[#2A323B] rounded-2xl p-2 flex items-center justify-center overflow-hidden">
+                      <img
+                        key={`${selectedScheduleTrack.slug}-${scheduleTrackConfig}`}
+                        src={getTrackSvgUrl(
+                          selectedScheduleTrack,
+                          scheduleTrackConfig
+                        )}
+                        alt={`${selectedScheduleTrack.name} Configuration ${scheduleTrackConfig}`}
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+
+                    {/* Configuration Picker Buttons (A, B, C, D, E, F) */}
+                    <div className="w-full flex flex-col items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#8A99AD]">
+                        Choose Track Configuration:
+                      </span>
+                      <div className="flex items-center justify-center flex-wrap gap-2">
+                        {selectedScheduleTrack.configurations.map((cfg) => {
+                          const isActive = scheduleTrackConfig === cfg
+                          return (
+                            <button
+                              key={cfg}
+                              type="button"
+                              onClick={() => setScheduleTrackConfig(cfg)}
+                              className={`min-w-[44px] h-9 px-3.5 rounded-full font-display font-extrabold text-sm tracking-wider uppercase transition cursor-pointer ${
+                                isActive
+                                  ? 'bg-[#FF6B00] text-black border-2 border-white shadow-md shadow-[#FF6B00]/30'
+                                  : 'bg-[#1C2228] hover:bg-[#252D35] text-white border border-[#2A323B]'
+                              }`}
+                            >
+                              {cfg}
+                            </button>
+                          )
+                        })}
+                        {selectedScheduleTrack.inProgressConfigurations?.map(
+                          (cfg) => (
+                            <span
+                              key={cfg}
+                              title="Configuration in progress"
+                              className="h-9 px-3 rounded-full bg-[#1C2228]/50 border border-[#2A323B]/60 text-[10px] font-display font-bold text-[#8A99AD]/60 flex items-center justify-center uppercase cursor-not-allowed"
+                            >
+                              {cfg} (Soon)
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {scheduleRaceError && (
                   <p className="text-xs font-bold text-red-400 text-center">
@@ -3911,7 +4194,13 @@ export function App() {
               <div className="grid grid-cols-2 gap-3.5 w-full pt-1">
                 <button
                   type="button"
-                  onClick={() => setActiveView('league-options')}
+                  onClick={() =>
+                    setActiveView(
+                      editingRaceId && selectedRaceForDetail
+                        ? 'league-race-detail'
+                        : 'league-options'
+                    )
+                  }
                   className="bg-[#14191E] hover:bg-[#192026] border border-[#2A323B] hover:border-red-500/50 active:scale-[0.98] transition-all rounded-3xl h-36 p-4 flex flex-col items-center justify-center shadow-lg cursor-pointer"
                 >
                   <span className="font-display font-extrabold text-2xl tracking-wider text-[#EF4444] uppercase">
@@ -4051,6 +4340,9 @@ export function App() {
                           <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] leading-tight">
                             {formattedDate}
                             {race.eventTime ? ` · ${race.eventTime}` : ''}
+                            {race.trackConfig
+                              ? ` · CONFIG ${race.trackConfig}`
+                              : ''}
                           </span>
                         </div>
 
@@ -4081,6 +4373,8 @@ export function App() {
                               onClick={() => {
                                 setSelectedRaceForDetail(race)
                                 setIsChangingRaceRsvp(false)
+                                setConfirmDeleteRaceId(null)
+                                setIsDirectionsOpen(false)
                                 setActiveView('league-race-detail')
                               }}
                               className="px-5 py-1.5 rounded-full bg-[#2A323B] hover:bg-[#36414D] border border-[#FF6B00]/50 active:scale-95 transition cursor-pointer"
@@ -4108,82 +4402,198 @@ export function App() {
               <TrackDayHeader
                 sectionTitle={selectedRaceForDetail.name}
                 sectionSubtitle={selectedLeague.name}
-                onBack={() => setActiveView('league-races')}
+                onBack={() => {
+                  setConfirmDeleteRaceId(null)
+                  setIsDirectionsOpen(false)
+                  setActiveView('league-races')
+                }}
                 onBellClick={handleOpenNotifications}
                 unreadNotificationsCount={unreadNotificationsCount}
               />
 
               <div className="px-5 flex-1 flex flex-col justify-between gap-3.5">
                 {/* 1. LOCATION & CIRCUIT MAP CARD */}
-                <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-4 flex flex-col items-center text-center shadow-lg">
-                  <span className="font-display font-extrabold text-sm tracking-widest text-[#FF6B00] uppercase leading-tight">
-                    LOCATION
-                  </span>
-                  <h2 className="font-display font-extrabold text-xl tracking-wider text-[#FF6B00] uppercase leading-tight mb-2">
-                    {selectedRaceForDetail.location ||
-                      selectedRaceForDetail.name}
-                  </h2>
+                {(() => {
+                  const resolvedTrack =
+                    findKartingTrack(selectedRaceForDetail.trackSlug) ||
+                    findKartingTrack(selectedRaceForDetail.location) ||
+                    findKartingTrack(selectedRaceForDetail.name)
+                  const raceConfig = (
+                    selectedRaceForDetail.trackConfig || 'A'
+                  ).toUpperCase()
+                  const displayLocationName = resolvedTrack
+                    ? resolvedTrack.name
+                    : selectedRaceForDetail.location ||
+                      selectedRaceForDetail.name
+                  const displayAddress =
+                    selectedRaceForDetail.trackAddress ||
+                    resolvedTrack?.address ||
+                    displayLocationName
+                  const navLinks = getTrackNavigationLinks(
+                    displayLocationName,
+                    displayAddress
+                  )
 
-                  {/* Illustrated Karting Circuit Map SVG (Matching Kandava Track Loop in Wireframe) */}
-                  <div className="w-full max-w-[250px] h-36 flex items-center justify-center my-1">
-                    <svg
-                      viewBox="0 0 280 160"
-                      className="w-full h-full drop-shadow-xl"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      {/* Outer White Track Kerb Border */}
-                      <path
-                        d="M55 48 C42 25, 95 14, 142 26 C185 37, 205 60, 232 66 C255 71, 258 92, 238 102 C226 108, 246 122, 234 134 C222 146, 202 136, 188 118 C172 98, 138 96, 114 118 C88 142, 54 142, 52 112 C50 92, 66 68, 55 48 Z"
-                        stroke="#F8FAFC"
-                        strokeWidth="18"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      {/* Dark Asphalt Track Surface */}
-                      <path
-                        d="M55 48 C42 25, 95 14, 142 26 C185 37, 205 60, 232 66 C255 71, 258 92, 238 102 C226 108, 246 122, 234 134 C222 146, 202 136, 188 118 C172 98, 138 96, 114 118 C88 142, 54 142, 52 112 C50 92, 66 68, 55 48 Z"
-                        stroke="#4B4941"
-                        strokeWidth="14"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      {/* Dashed Yellow Center Racing Line */}
-                      <path
-                        d="M55 48 C42 25, 95 14, 142 26 C185 37, 205 60, 232 66 C255 71, 258 92, 238 102 C226 108, 246 122, 234 134 C222 146, 202 136, 188 118 C172 98, 138 96, 114 118 C88 142, 54 142, 52 112 C50 92, 66 68, 55 48 Z"
-                        stroke="#FACC15"
-                        strokeWidth="1.6"
-                        strokeDasharray="4 4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      {/* Start/Finish Line Marker */}
-                      <line
-                        x1="138"
-                        y1="95"
-                        x2="142"
-                        y2="111"
-                        stroke="#FF6B00"
-                        strokeWidth="3.5"
-                      />
-                    </svg>
-                  </div>
+                  return (
+                    <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-4 flex flex-col items-center text-center shadow-lg relative">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="font-display font-extrabold text-sm tracking-widest text-[#FF6B00] uppercase leading-tight">
+                          LOCATION
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border border-[#FF6B00]/50 text-[#FF6B00]">
+                          CONFIG {raceConfig}
+                        </span>
+                      </div>
 
-                  {/* Date & Time Pill Bar */}
-                  <div className="w-full bg-[#2A323B] border border-[#36414D] rounded-full py-1.5 px-4 mt-1 flex items-center justify-center gap-2">
-                    <span className="font-display font-extrabold text-xs tracking-wider text-white">
-                      {selectedRaceForDetail.eventDate
-                        ? selectedRaceForDetail.eventDate
-                            .split('-')
-                            .reverse()
-                            .join('.')
-                        : 'TBA'}
-                      {selectedRaceForDetail.eventTime
-                        ? ` · ${selectedRaceForDetail.eventTime}`
-                        : ''}
-                    </span>
-                  </div>
-                </div>
+                      {/* Clickable Track Location / Address — Opens Directions in Google Maps / Waze */}
+                      <button
+                        type="button"
+                        onClick={() => setIsDirectionsOpen((o) => !o)}
+                        title="Tap to open directions in Google Maps or Waze"
+                        className="group mt-1 w-full bg-[#14191E]/80 hover:bg-[#14191E] border border-[#2A323B] hover:border-[#38BDF8]/70 rounded-2xl px-3.5 py-2 flex flex-col items-center justify-center gap-0.5 transition cursor-pointer"
+                      >
+                        <div className="flex items-center justify-center gap-1.5">
+                          <MapPin className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                          <h2 className="font-display font-extrabold text-lg sm:text-xl tracking-wider text-[#FF6B00] group-hover:text-white uppercase leading-tight">
+                            {displayLocationName}
+                          </h2>
+                          <Navigation className="w-3.5 h-3.5 text-[#38BDF8] shrink-0" />
+                        </div>
+                        <span className="text-[11px] text-[#8A99AD] group-hover:text-white leading-snug">
+                          {displayAddress}
+                        </span>
+                        <span className="text-[9px] font-extrabold uppercase tracking-wider text-[#38BDF8] mt-0.5 flex items-center gap-1">
+                          <ExternalLink className="w-2.5 h-2.5" />
+                          {isDirectionsOpen
+                            ? 'Hide Navigation Apps'
+                            : 'Tap for Directions (Google Maps / Waze)'}
+                        </span>
+                      </button>
+
+                      {/* Expandable Navigation Apps Bar (Google Maps, Waze, Apple Maps) */}
+                      {isDirectionsOpen && (
+                        <div className="w-full mt-2 bg-[#14191E] border border-[#38BDF8]/50 rounded-2xl p-2.5 flex flex-col gap-2">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#38BDF8]">
+                            Open Track Directions In:
+                          </span>
+                          <div className="grid grid-cols-3 gap-2">
+                            <a
+                              href={navLinks.googleMapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="h-9 rounded-xl bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] hover:border-[#FF6B00] text-[11px] font-display font-extrabold uppercase tracking-wider text-white flex items-center justify-center gap-1 transition"
+                            >
+                              <span>Google Maps</span>
+                            </a>
+                            <a
+                              href={navLinks.wazeUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="h-9 rounded-xl bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] hover:border-[#38BDF8] text-[11px] font-display font-extrabold uppercase tracking-wider text-[#38BDF8] flex items-center justify-center gap-1 transition"
+                            >
+                              <span>Waze</span>
+                            </a>
+                            <a
+                              href={navLinks.appleMapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="h-9 rounded-xl bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] hover:border-white/60 text-[11px] font-display font-extrabold uppercase tracking-wider text-white flex items-center justify-center gap-1 transition"
+                            >
+                              <span>Apple Maps</span>
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Official Karting Track Configuration SVG */}
+                      <div className="w-full h-40 bg-[#14191E]/60 border border-[#2A323B] rounded-2xl p-2 flex items-center justify-center my-2 overflow-hidden">
+                        <img
+                          key={`${resolvedTrack?.slug || 'default'}-${raceConfig}`}
+                          src={getTrackSvgUrl(resolvedTrack, raceConfig)}
+                          alt={`${displayLocationName} Configuration ${raceConfig}`}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+
+                      {/* Date & Time Pill Bar */}
+                      <div className="w-full bg-[#2A323B] border border-[#36414D] rounded-full py-1.5 px-4 mt-0.5 flex items-center justify-center gap-2">
+                        <span className="font-display font-extrabold text-xs tracking-wider text-white">
+                          {selectedRaceForDetail.eventDate
+                            ? selectedRaceForDetail.eventDate
+                                .split('-')
+                                .reverse()
+                                .join('.')
+                            : 'TBA'}
+                          {selectedRaceForDetail.eventTime
+                            ? ` · ${selectedRaceForDetail.eventTime}`
+                            : ''}
+                          {` · CONFIG ${raceConfig}`}
+                        </span>
+                      </div>
+
+                      {/* ADMIN CONTROLS: EDIT RACE & DELETE RACE */}
+                      {isEffectiveAdmin && (
+                        <div className="w-full mt-3 pt-3 border-t border-[#2A323B] flex flex-col gap-2">
+                          {confirmDeleteRaceId === selectedRaceForDetail.id ? (
+                            <div className="w-full bg-[#14191E] border border-red-500/60 rounded-2xl p-3 flex flex-col gap-2">
+                              <p className="text-xs font-bold text-red-400 uppercase tracking-wider">
+                                Delete / Cancel "{selectedRaceForDetail.name}"?
+                              </p>
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteRaceId(null)}
+                                  className="h-9 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] text-xs font-extrabold uppercase tracking-wider text-white cursor-pointer"
+                                >
+                                  Keep Race
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isDeletingRace}
+                                  onClick={() =>
+                                    handleDeleteRace(selectedRaceForDetail.id)
+                                  }
+                                  className="h-9 rounded-full bg-[#dc2626] hover:bg-[#b91c1c] text-xs font-extrabold uppercase tracking-wider text-white flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {isDeletingRace
+                                    ? 'Deleting...'
+                                    : 'Confirm Delete'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2.5 w-full">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenEditRace(selectedRaceForDetail)
+                                }
+                                className="h-9 rounded-full bg-[#14191E] hover:bg-[#242C35] border border-[#FF6B00]/60 text-[#FF6B00] font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                EDIT RACE
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmDeleteRaceId(
+                                    selectedRaceForDetail.id
+                                  )
+                                }
+                                className="h-9 rounded-full bg-[#dc2626]/20 hover:bg-[#dc2626] text-red-400 hover:text-white border border-red-500/50 font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                DELETE RACE
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* 2. CONDITIONAL BOTTOM SECTION:
                     - Before choosing participation status (or when changing it): PASS & PARTICIPATE cards

@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 415" width="100%" height="100%">
+  <defs>
+    <!-- Master Track Geometry -->
+    <path id="kart-track" pathLength="1000" d="
+      M 272, 78
+      L 540, 78
+      C 595, 78, 608, 95, 608, 122
+      C 608, 148, 590, 156, 540, 156
+      L 455, 158
+      C 418, 158, 412, 175, 422, 205
+      C 432, 235, 465, 242, 535, 242
+      C 605, 242, 640, 225, 662, 180
+      L 695, 105
+      C 708, 76, 725, 72, 765, 73
+      L 855, 76
+      C 902, 78, 912, 100, 912, 155
+      L 910, 245
+      C 908, 285, 885, 298, 838, 298
+      C 785, 298, 750, 275, 745, 238
+      C 740, 205, 762, 202, 795, 220
+      C 828, 238, 855, 235, 855, 195
+      L 855, 165
+      C 855, 132, 825, 125, 785, 130
+      C 745, 135, 728, 158, 708, 205
+      L 682, 262
+      C 665, 295, 635, 304, 575, 305
+      L 465, 306
+      C 405, 306, 378, 290, 360, 250
+      L 332, 192
+      C 315, 162, 275, 152, 235, 155
+      C 190, 158, 150, 185, 138, 212
+      C 126, 238, 148, 252, 185, 245
+      L 242, 232
+      C 282, 225, 306, 242, 305, 268
+      C 304, 295, 265, 312, 195, 312
+      C 120, 312, 85, 285, 68, 225
+      C 52, 165, 60, 120, 92, 95
+      C 120, 75, 165, 80, 272, 78
+      Z" />
+
+    <!-- Neon Orange Glow Filter -->
+    <filter id="neon-orange-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur1" />
+      <feGaussianBlur stdDeviation="12" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base Track (White) -->
+  <use href="#kart-track" fill="none" stroke="#f0f4f8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" />
+
+  <!-- Start/Finish Line -->
+  <line x1="272" y1="52" x2="272" y2="104" stroke="#ffffff" stroke-width="5" stroke-linecap="round" />
+
+  <!-- Layered Fading Neon Orange Trail (Counter-Clockwise) -->
+  <!-- Layer 1: Faintest, longest tail -->
+  <use href="#kart-track" fill="none" stroke="#ff4500" stroke-width="4" stroke-linecap="round" opacity="0.2" stroke-dasharray="160 840">
+    <animate attributeName="stroke-dashoffset" from="0" to="1000" dur="8s" repeatCount="indefinite" />
+  </use>
+
+  <!-- Layer 2: Mid-tail -->
+  <use href="#kart-track" fill="none" stroke="#ff5500" stroke-width="6" stroke-linecap="round" opacity="0.45" stroke-dasharray="110 890">
+    <animate attributeName="stroke-dashoffset" from="0" to="1000" dur="8s" repeatCount="indefinite" />
+  </use>
+
+  <!-- Layer 3: Bright inner tail -->
+  <use href="#kart-track" fill="none" stroke="#ff6a00" stroke-width="8" stroke-linecap="round" opacity="0.75" filter="url(#neon-orange-glow)" stroke-dasharray="65 935">
+    <animate attributeName="stroke-dashoffset" from="0" to="1000" dur="8s" repeatCount="indefinite" />
+  </use>
+
+  <!-- Layer 4: Intense core tail right behind the ball -->
+  <use href="#kart-track" fill="none" stroke="#ff9900" stroke-width="10" stroke-linecap="round" opacity="0.95" filter="url(#neon-orange-glow)" stroke-dasharray="25 975">
+    <animate attributeName="stroke-dashoffset" from="0" to="1000" dur="8s" repeatCount="indefinite" />
+  </use>
+
+  <!-- Moving Neon Orange Ball (Counter-Clockwise) -->
+  <g filter="url(#neon-orange-glow)">
+    <!-- Outer Neon Halo -->
+    <circle r="9" fill="#ff5500" />
+    <!-- Bright Hot Core -->
+    <circle r="4.5" fill="#ffffff" />
+    <animateMotion dur="8s" repeatCount="indefinite" rotate="auto" keyPoints="1;0" keyTimes="0;1" calcMode="linear">
+      <mpath href="#kart-track" />
+    </animateMotion>
+  </g>
+</svg>
