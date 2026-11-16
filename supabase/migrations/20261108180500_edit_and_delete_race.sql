@@ -14,31 +14,30 @@ alter table public.events add column if not exists track_address text not null d
 alter table public.events add column if not exists track_slug text not null default '';
 
 -- 2. Seed the 7 official Karting Tracks and their configurations (A..F) into `public.tracks`
-insert into public.tracks (name, layout, country_code, address, slug)
+insert into public.tracks (name, layout, address, slug)
 values
-  ('KANDAVA KARTODROMS', 'A', 'LV', 'Jelgavas iela 16, Kandava, Kandava pilsēta, Tukuma novads, LV-3120', 'kandava'),
-  ('KANDAVA KARTODROMS', 'B', 'LV', 'Jelgavas iela 16, Kandava, Kandava pilsēta, Tukuma novads, LV-3120', 'kandava'),
-  ('Kartings.lv', 'A', 'LV', 'Gustava Zemgala gat. 77-k-1, Vidzemes priekšpilsēta, Rīga, LV-1039', 'kartings-lv'),
-  ('Kartings.lv', 'B', 'LV', 'Gustava Zemgala gat. 77-k-1, Vidzemes priekšpilsēta, Rīga, LV-1039', 'kartings-lv'),
-  ('Madonas kartinga trase', 'A', 'LV', 'Gaujas iela 41, Madona, Madona pilsēta, Madonas novads, LV-4801', 'madona'),
-  ('Madonas kartinga trase', 'B', 'LV', 'Gaujas iela 41, Madona, Madona pilsēta, Madonas novads, LV-4801', 'madona'),
-  ('Rullītis Jelgava', 'A', 'LV', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
-  ('Rullītis Jelgava', 'B', 'LV', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
-  ('Rullītis Jelgava', 'C', 'LV', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
-  ('Rullītis Jelgava', 'D', 'LV', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
-  ('Rullītis Jelgava', 'E', 'LV', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
-  ('Rullītis Jelgava', 'F', 'LV', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
-  ('XL Rīga kartinga nams', 'A', 'LV', 'Ūdens iela 23, Kurzemes rajons, Rīga, LV-1007', 'xl-riga'),
-  ('XL Rīga kartinga nams', 'B', 'LV', 'Ūdens iela 23, Kurzemes rajons, Rīga, LV-1007', 'xl-riga'),
-  ('Baciunu kartodromas MANDE, Šauļi, LT', 'A', 'LT', 'Bačiūnų g. 27A, Šiauliai, 76383 Šiaulių m. sav., Lithuania', 'baciunu-siauliai'),
-  ('Baciunu kartodromas MANDE, Šauļi, LT', 'B', 'LT', 'Bačiūnų g. 27A, Šiauliai, 76383 Šiaulių m. sav., Lithuania', 'baciunu-siauliai'),
-  ('Serbentu kartodromas MANDE, Šauļi, LT', 'A', 'LT', 'Serbentų g. 86, Šiauliai, 78136 Šiaulių m. sav., Lithuania', 'serbentu-siauliai'),
-  ('Serbentu kartodromas MANDE, Šauļi, LT', 'B', 'LT', 'Serbentų g. 86, Šiauliai, 78136 Šiaulių m. sav., Lithuania', 'serbentu-siauliai')
+  ('KANDAVA KARTODROMS', 'A', 'Jelgavas iela 16, Kandava, Kandava pilsēta, Tukuma novads, LV-3120', 'kandava'),
+  ('KANDAVA KARTODROMS', 'B', 'Jelgavas iela 16, Kandava, Kandava pilsēta, Tukuma novads, LV-3120', 'kandava'),
+  ('Kartings.lv', 'A', 'Gustava Zemgala gat. 77-k-1, Vidzemes priekšpilsēta, Rīga, LV-1039', 'kartings-lv'),
+  ('Kartings.lv', 'B', 'Gustava Zemgala gat. 77-k-1, Vidzemes priekšpilsēta, Rīga, LV-1039', 'kartings-lv'),
+  ('Madonas kartinga trase', 'A', 'Gaujas iela 41, Madona, Madona pilsēta, Madonas novads, LV-4801', 'madona'),
+  ('Madonas kartinga trase', 'B', 'Gaujas iela 41, Madona, Madona pilsēta, Madonas novads, LV-4801', 'madona'),
+  ('Rullītis Jelgava', 'A', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
+  ('Rullītis Jelgava', 'B', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
+  ('Rullītis Jelgava', 'C', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
+  ('Rullītis Jelgava', 'D', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
+  ('Rullītis Jelgava', 'E', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
+  ('Rullītis Jelgava', 'F', 'Kartinga sporta centrs, Aku ceļš 1, Jelgava, LV-3008', 'rullitis-jelgava'),
+  ('XL Rīga kartinga nams', 'A', 'Ūdens iela 23, Kurzemes rajons, Rīga, LV-1007', 'xl-riga'),
+  ('XL Rīga kartinga nams', 'B', 'Ūdens iela 23, Kurzemes rajons, Rīga, LV-1007', 'xl-riga'),
+  ('Baciunu kartodromas MANDE, Šauļi, LT', 'A', 'Bačiūnų g. 27A, Šiauliai, 76383 Šiaulių m. sav., Lithuania', 'baciunu-siauliai'),
+  ('Baciunu kartodromas MANDE, Šauļi, LT', 'B', 'Bačiūnų g. 27A, Šiauliai, 76383 Šiaulių m. sav., Lithuania', 'baciunu-siauliai'),
+  ('Serbentu kartodromas MANDE, Šauļi, LT', 'A', 'Serbentų g. 86, Šiauliai, 78136 Šiaulių m. sav., Lithuania', 'serbentu-siauliai'),
+  ('Serbentu kartodromas MANDE, Šauļi, LT', 'B', 'Serbentų g. 86, Šiauliai, 78136 Šiaulių m. sav., Lithuania', 'serbentu-siauliai')
 on conflict (name, layout) do update
 set
   address = excluded.address,
-  slug = excluded.slug,
-  country_code = excluded.country_code;
+  slug = excluded.slug;
 
 -- 3. Schedule a new race (`fn_schedule_race`) with track, configuration, and address
 drop function if exists public.fn_schedule_race(uuid, text, date, text, text);
