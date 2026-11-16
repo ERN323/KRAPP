@@ -89,7 +89,8 @@ export function normalizeAppRole(raw?: string | null): LeagueRole {
 }
 
 export async function signInWithGoogle() {
-  const redirectTo = window.location.origin + window.location.pathname
+  const redirectTo =
+    window.location.origin + window.location.pathname + window.location.search
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
@@ -755,4 +756,28 @@ export async function assignDriverPenaltyInSupabase(input: {
   }
 
   return String(data)
+}
+
+export async function fetchLeagueInviteInfoInSupabase(
+  leagueId: string
+): Promise<{
+  isPrivate: boolean
+  invitePassword: string | null
+}> {
+  const { data, error } = await supabase.rpc('fn_get_league_invite_info', {
+    p_league_id: leagueId,
+  })
+
+  if (error || !Array.isArray(data) || data.length === 0) {
+    return {
+      isPrivate: false,
+      invitePassword: null,
+    }
+  }
+
+  const row = data[0] as Record<string, unknown>
+  return {
+    isPrivate: Boolean(row.is_private),
+    invitePassword: row.invite_password ? String(row.invite_password) : null,
+  }
 }

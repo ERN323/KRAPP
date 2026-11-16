@@ -38,6 +38,7 @@ import { COUNTRIES, CountryFlagCircle } from './components/CountryFlags'
 import { TrackDayHeader, CardGraphicSvg } from './components/TrackDayTheme'
 import { AuthScreen } from './components/AuthScreen'
 import { LogoCropModal } from './components/LogoCropModal'
+import { InviteRacersModal } from './components/InviteRacersModal'
 import {
   KartingTrackInfo,
   TrackConfigCode,
@@ -77,6 +78,7 @@ import {
   updateLeagueRaceInSupabase,
   deleteLeagueRaceInSupabase,
   setRaceRsvpInSupabase,
+  fetchLeagueInviteInfoInSupabase,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -276,6 +278,13 @@ export function App() {
   const [joinPasswordInput, setJoinPasswordInput] = useState('')
   const [joinPasswordError, setJoinPasswordError] = useState('')
 
+  // Invite Racers Modal State
+  const [isInviteRacersModalOpen, setIsInviteRacersModalOpen] = useState(false)
+  const [inviteLeaguePassword, setInviteLeaguePassword] = useState<string | null>(
+    null
+  )
+  const [loadingInvitePassword, setLoadingInvitePassword] = useState(false)
+
   // Listen to Supabase Auth session (Google OAuth + Email)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
@@ -358,7 +367,53 @@ export function App() {
       }
     })
 
-    fetchAllLeagues().then((loaded) => setAllLeagues(loaded))
+    fetchAllLeagues().then(async (loaded) => {
+      setAllLeagues(loaded)
+
+      // Handle QR / Link Invite Deep Link (`?inviteLeague=<uuid>&pwd=<password>`)
+      const params = new URLSearchParams(window.location.search)
+      const inviteLeagueId = params.get('inviteLeague')
+      const invitePwd = params.get('pwd')
+
+      if (inviteLeagueId) {
+        // Clear query params from address bar so refreshes don't re-trigger
+        window.history.replaceState({}, '', window.location.pathname)
+
+        const targetLeague = loaded.find((l) => l.id === inviteLeagueId)
+        if (targetLeague?.isMember) {
+          setSelectedLeague(targetLeague)
+          setRolePreviewOverride(null)
+          setActiveView('league-detail')
+          return
+        }
+
+        try {
+          const assignedRole = await joinLeagueInSupabase(
+            inviteLeagueId,
+            invitePwd || undefined
+          )
+          const refreshed = await fetchAllLeagues()
+          setAllLeagues(refreshed)
+          const joined = refreshed.find((l) => l.id === inviteLeagueId)
+          if (joined) {
+            setSelectedLeague({
+              ...joined,
+              isMember: true,
+              myRole: assignedRole,
+            })
+            setRolePreviewOverride(null)
+            setActiveView('league-detail')
+          }
+        } catch {
+          if (targetLeague && targetLeague.isPrivate) {
+            setPendingJoinLeague(targetLeague)
+            setJoinPasswordInput(invitePwd || '')
+            setJoinPasswordError('')
+            setActiveView('join-league-password')
+          }
+        }
+      }
+    })
     fetchMyNotifications().then((loaded) => setNotifications(loaded))
   }, [session])
 
@@ -1203,6 +1258,21 @@ export function App() {
     }
   }
 
+  const handleOpenInviteRacers = async () => {
+    if (!selectedLeague) return
+    setInviteLeaguePassword(null)
+    setIsInviteRacersModalOpen(true)
+    if (selectedLeague.isPrivate) {
+      setLoadingInvitePassword(true)
+      try {
+        const info = await fetchLeagueInviteInfoInSupabase(selectedLeague.id)
+        setInviteLeaguePassword(info.invitePassword)
+      } finally {
+        setLoadingInvitePassword(false)
+      }
+    }
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
     if (actionTitle === 'TEAMS' || actionTitle === 'MY TEAM') {
       handleOpenMyTeam()
@@ -1218,6 +1288,10 @@ export function App() {
     }
     if (actionTitle === 'SCHEDULE RACE') {
       handleOpenScheduleRace()
+      return
+    }
+    if (actionTitle === 'INVITE RACERS') {
+      handleOpenInviteRacers()
       return
     }
     if (actionTitle === 'CREATE TEAM') {
@@ -5041,6 +5115,15 @@ export function App() {
           setTeamLogoDataUrl(croppedUrl)
           setIsLogoCropModalOpen(false)
         }}
+      />
+
+      {/* Invite Racers QR Code & Share Link Popup Modal */}
+      <InviteRacersModal
+        league={selectedLeague}
+        isOpen={isInviteRacersModalOpen}
+        loadingPassword={loadingInvitePassword}
+        invitePassword={inviteLeaguePassword}
+        onClose={() => setIsInviteRacersModalOpen(false)}
       />
     </div>
   )
