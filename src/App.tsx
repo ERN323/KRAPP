@@ -4501,28 +4501,67 @@ export function App() {
                         const top1 = race.top3Names?.[0] || 'To be known'
                         const top2 = race.top3Names?.[1] || 'To be known'
                         const top3 = race.top3Names?.[2] || 'To be known'
+                        const raceTrack =
+                          findKartingTrack(race.trackSlug) ||
+                          findKartingTrack(race.location) ||
+                          findKartingTrack(race.name)
+                        const raceConfig = (
+                          race.trackConfig || 'A'
+                        ).toUpperCase()
+                        const trackLabel = raceTrack
+                          ? raceTrack.name
+                          : race.location || race.name
+                        const showSeparateTrackSubtitle =
+                          trackLabel.trim().toLowerCase() !==
+                          race.name.trim().toLowerCase()
+
+                        const openRaceDetail = () => {
+                          setSelectedRaceForDetail(race)
+                          setIsChangingRaceRsvp(false)
+                          setConfirmDeleteRaceId(null)
+                          setIsDirectionsOpen(false)
+                          setActiveView('league-race-detail')
+                        }
 
                         return (
                           <div
                             key={race.id}
-                            className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-3.5 flex flex-col gap-3 shadow-lg"
+                            className="w-full bg-[#1C2228] border border-[#2A323B] rounded-3xl p-4 flex flex-col gap-3 shadow-lg"
                           >
-                            {/* Top Inner Pill: Race Title & Date */}
-                            <div className="w-full bg-[#2A323B]/80 border border-[#36414D] rounded-2xl py-2 px-4 flex flex-col items-center justify-center text-center">
-                              <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase leading-tight">
+                            {/* 1. Top Inner Pill: Race Title, Track Name & Date */}
+                            <div className="w-full bg-[#2A323B]/80 border border-[#36414D] rounded-2xl py-2.5 px-4 flex flex-col items-center justify-center text-center">
+                              <span className="font-display font-extrabold text-lg tracking-wider text-[#FF6B00] uppercase leading-tight">
                                 {race.name}
                               </span>
-                              <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] leading-tight">
+                              {showSeparateTrackSubtitle && (
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-white/90 leading-tight mt-0.5">
+                                  {trackLabel}
+                                </span>
+                              )}
+                              <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] leading-tight mt-0.5">
                                 {formattedDate}
                                 {race.eventTime ? ` · ${race.eventTime}` : ''}
-                                {race.trackConfig
-                                  ? ` · CONFIG ${race.trackConfig}`
-                                  : ''}
+                                {` · CONFIG ${raceConfig}`}
                               </span>
                             </div>
 
-                            {/* Bottom Row: Top 3 Racers on Left + SEE MORE Button on Right */}
-                            <div className="flex items-center justify-between px-2 pb-1 gap-3">
+                            {/* 2. Center Track Map Display Box */}
+                            <button
+                              type="button"
+                              onClick={openRaceDetail}
+                              title={`Inspect ${race.name} (${trackLabel} — Config ${raceConfig})`}
+                              className="w-full h-36 sm:h-40 bg-[#111519] hover:bg-[#14191E] border border-[#2A323B] hover:border-[#FF6B00]/50 rounded-2xl p-2.5 flex items-center justify-center overflow-hidden shadow-inner transition cursor-pointer"
+                            >
+                              <img
+                                key={`${race.id}-${raceTrack?.slug || 'default'}-${raceConfig}`}
+                                src={getTrackSvgUrl(raceTrack, raceConfig)}
+                                alt={`${trackLabel} Configuration ${raceConfig}`}
+                                className="w-full h-full object-contain"
+                              />
+                            </button>
+
+                            {/* 3. Bottom Row: Top 3 Racers on Left + SEE MORE Button on Right */}
+                            <div className="flex items-end justify-between px-2 pb-0.5 gap-3">
                               <div className="flex flex-col gap-0.5 text-sm font-bold text-white min-w-0">
                                 <span className="truncate">1. {top1}</span>
                                 <span className="truncate">2. {top2}</span>
@@ -4545,13 +4584,7 @@ export function App() {
                                 )}
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setSelectedRaceForDetail(race)
-                                    setIsChangingRaceRsvp(false)
-                                    setConfirmDeleteRaceId(null)
-                                    setIsDirectionsOpen(false)
-                                    setActiveView('league-race-detail')
-                                  }}
+                                  onClick={openRaceDetail}
                                   className="px-5 py-1.5 rounded-full bg-[#2A323B] hover:bg-[#36414D] border border-[#FF6B00]/50 active:scale-95 transition cursor-pointer"
                                 >
                                   <span className="font-display font-extrabold text-xs tracking-wider text-[#FF6B00] uppercase">
