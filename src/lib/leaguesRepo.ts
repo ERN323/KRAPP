@@ -88,9 +88,25 @@ export function normalizeAppRole(raw?: string | null): LeagueRole {
   return 'RACER'
 }
 
+export const PENDING_INVITE_STORAGE_KEY = 'krapp_pending_league_invite_v1'
+
 export async function signInWithGoogle() {
-  const redirectTo =
-    window.location.origin + window.location.pathname + window.location.search
+  // Save any URL invite params into localStorage before OAuth redirect so they survive Google login
+  const params = new URLSearchParams(window.location.search)
+  const inviteLeague = params.get('inviteLeague')
+  const pwd = params.get('pwd')
+  if (inviteLeague) {
+    try {
+      localStorage.setItem(
+        PENDING_INVITE_STORAGE_KEY,
+        JSON.stringify({ inviteLeague, pwd: pwd || '' })
+      )
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  const redirectTo = window.location.origin + window.location.pathname
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {

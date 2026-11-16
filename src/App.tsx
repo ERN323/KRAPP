@@ -79,6 +79,7 @@ import {
   deleteLeagueRaceInSupabase,
   setRaceRsvpInSupabase,
   fetchLeagueInviteInfoInSupabase,
+  PENDING_INVITE_STORAGE_KEY,
   signOutUser,
 } from './lib/leaguesRepo'
 
@@ -285,8 +286,25 @@ export function App() {
   )
   const [loadingInvitePassword, setLoadingInvitePassword] = useState(false)
 
-  // Listen to Supabase Auth session (Google OAuth + Email)
+  // Listen to Supabase Auth session (Google OAuth + Email) and persist any URL invite params before OAuth redirect
   useEffect(() => {
+    const initialParams = new URLSearchParams(window.location.search)
+    const initialInviteLeague = initialParams.get('inviteLeague')
+    const initialInvitePwd = initialParams.get('pwd')
+    if (initialInviteLeague) {
+      try {
+        localStorage.setItem(
+          PENDING_INVITE_STORAGE_KEY,
+          JSON.stringify({
+            inviteLeague: initialInviteLeague,
+            pwd: initialInvitePwd || '',
+          })
+        )
+      } catch {
+        // ignore storage errors
+      }
+    }
+
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
       setSession(currentSession)
       setAuthLoading(false)
@@ -371,13 +389,39 @@ export function App() {
       setAllLeagues(loaded)
 
       // Handle QR / Link Invite Deep Link (`?inviteLeague=<uuid>&pwd=<password>`)
+      // Works both when already signed in AND after a brand-new user signs up / logs in via Google OAuth
       const params = new URLSearchParams(window.location.search)
-      const inviteLeagueId = params.get('inviteLeague')
-      const invitePwd = params.get('pwd')
+      let inviteLeagueId = params.get('inviteLeague')
+      let invitePwd = params.get('pwd')
+
+      if (!inviteLeagueId) {
+        try {
+          const savedInviteRaw = localStorage.getItem(
+            PENDING_INVITE_STORAGE_KEY
+          )
+          if (savedInviteRaw) {
+            const parsed = JSON.parse(savedInviteRaw) as {
+              inviteLeague?: string
+              pwd?: string
+            }
+            if (parsed.inviteLeague) {
+              inviteLeagueId = parsed.inviteLeague
+              invitePwd = parsed.pwd || null
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       if (inviteLeagueId) {
-        // Clear query params from address bar so refreshes don't re-trigger
+        // Clear query params & pending invite from storage so refreshes don't re-trigger
         window.history.replaceState({}, '', window.location.pathname)
+        try {
+          localStorage.removeItem(PENDING_INVITE_STORAGE_KEY)
+        } catch {
+          // ignore
+        }
 
         const targetLeague = loaded.find((l) => l.id === inviteLeagueId)
         if (targetLeague?.isMember) {

@@ -1,11 +1,21 @@
 import React, { useState } from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Flag } from 'lucide-react'
 import { KrappLogoHelmet } from './HelmetIcons'
-import { signInWithGoogle } from '../lib/leaguesRepo'
+import { signInWithGoogle, PENDING_INVITE_STORAGE_KEY } from '../lib/leaguesRepo'
 
 export const AuthScreen: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const hasPendingInvite = (() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('inviteLeague')) return true
+    try {
+      return Boolean(localStorage.getItem(PENDING_INVITE_STORAGE_KEY))
+    } catch {
+      return false
+    }
+  })()
 
   const handleGoogleLogin = async () => {
     setErrorMsg('')
@@ -53,9 +63,18 @@ export const AuthScreen: React.FC = () => {
           <h1 className="font-display font-extrabold text-2xl sm:text-3xl tracking-wider text-white uppercase mb-2">
             YOU ARE NOT <span className="text-[#FF6B00]">LOGGED IN</span>
           </h1>
-          <p className="text-xs text-[#8A99AD] max-w-xs mb-6 leading-relaxed">
+          <p className="text-xs text-[#8A99AD] max-w-xs mb-4 leading-relaxed">
             Sign in with your Google account to load your saved driver profile, number, weight, teams, and leagues across all devices.
           </p>
+
+          {hasPendingInvite && (
+            <div className="w-full flex items-center justify-center gap-2 text-xs font-bold text-[#FF6B00] bg-[#FF6B00]/15 border border-[#FF6B00]/50 rounded-2xl p-3 mb-4">
+              <Flag className="w-4 h-4 shrink-0" />
+              <span>
+                LEAGUE INVITE DETECTED — Sign in with Google to join and open the league automatically!
+              </span>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="w-full flex items-center gap-2 text-xs text-red-400 bg-red-950/40 border border-red-800/50 rounded-xl p-3 mb-4 text-left">
