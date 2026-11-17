@@ -1,0 +1,340 @@
+-- =====================================================================================================
+-- Migration: Upload Race & Qualifying Results (SpeedHive CSV & Photo Validation Pipeline)
+-- Compatible with 20261107000000_schema.sql (`sessions`, `uploads`, `session_results`, `event_entries`, `v_combined_quali`, `v_event_classification`)
+-- =====================================================================================================
+
+-- 1. Upload & Publish a Qualifying Heat (`QUALI` 1..N) or Race Final (`FINAL` A..Z) atomically
+create or replace function public.fn_upload_session_results(
+  p_event_id uuid,
+  p_kind text,                 -- 'QUALI' or 'FINAL'
+  p_batch_no int default null, -- 1, 2, 3... when p_kind = 'QUALI'
+  p_final_letter text default null, -- 'A', 'B', 'C'... when p_kind = 'FINAL'
+  p_max_karts int default 12,
+  p_rows jsonb default '[]'::jsonb
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_actor public.drivers;
+  v_league_id uuid;
+  v_season_id uuid;
+  v_caller_app_role text;
+  v_caller_db_role public.league_role;
+  v_clean_kind public.session_kind;
+  v_clean_batch int := null;
+  v_clean_letter char(1) := null;
+  v_session_id uuid;
+  v_upload_id uuid;
+  v_row jsonb;
+  v_driver_id uuid;
+  v_raw_comp text;
+  v_comp_norm text;
+  v_start_num text;
+  v_pos int;
+  v_status public.result_status;
+  v_laps int;
+  v_total_ms int;
+  v_gap_ms int;
+  v_gap_laps int;
+  v_best_ms int;
+  v_second_ms int;
+  v_best_lap_no int;
+  v_best_speed numeric(7, 3);
+  v_team_id uuid;
+  v_base_handle text;
+  v_candidate_handle text;
+  v_suffix int;
+begin
+  v_actor := public.fn_ensure_current_driver();
+
+  select e.league_id, e.season_id
+  into v_league_id, v_season_id
+  from public.events e
+  where e.id = p_event_id;
+
+  if v_league_id is null then
+    raise exception 'Selected race event not found';
+  end if;
+
+  select m.app_role, m.role
+  into v_caller_app_role, v_caller_db_role
+  from public.league_members m
+  where m.league_id = v_league_id and m.driver_id = v_actor.id;
+
+  if not found or (
+    v_caller_app_role not in ('ADMIN', 'CO-ADMIN') and
+    v_caller_db_role not in ('owner', 'organiser')
+  ) then
+    raise exception 'Only League Admins can upload race results';
+  end if;
+
+  if upper(trim(coalesce(p_kind, ''))) in ('QUALI', 'QUALY', 'QUALIFYING') then
+    v_clean_kind := 'QUALI'::public.session_kind;
+    v_clean_batch := greatest(coalesce(p_batch_no, 1), 1);
+    v_clean_letter := null;
+  else
+    v_clean_kind := 'FINAL'::public.session_kind;
+    v_clean_batch := null;
+    v_clean_letter := substr(upper(trim(coalesce(nullif(p_final_letter, ''), 'A'))), 1, 1);
+  end if;
+
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
+    raise exception 'No result rows provided to upload';
+  end if;
+
+  -- If FINAL, also record the slots in `event_finals`
+  if v_clean_kind = 'FINAL' and v_clean_letter is not null then
+    insert into public.event_finals (event_id, letter, slots)
+    values (p_event_id, v_clean_letter, greatest(coalesce(p_max_karts, 12), 1))
+    on conflict (event_id, letter) do update
+    set slots = excluded.slots;
+  end if;
+
+  -- Ensure the `sessions` row exists
+  select s.id into v_session_id
+  from public.sessions s
+  where s.event_id = p_event_id
+    and s.kind = v_clean_kind
+    and s.batch_no is not distinct from v_clean_batch
+    and s.final_letter is not distinct from v_clean_letter;
+
+  if v_session_id is null then
+    insert into public.sessions (event_id, kind, batch_no, final_letter)
+    values (p_event_id, v_clean_kind, v_clean_batch, v_clean_letter)
+    returning id into v_session_id;
+  end if;
+
+  -- Mark any existing uploads for this session as 'superseded'
+  update public.uploads
+  set status = 'superseded'
+  where session_id = v_session_id and status <> 'superseded';
+
+  -- Create new published upload record
+  insert into public.uploads (
+    session_id,
+    storage_path,
+    sha256,
+    uploaded_by,
+    status,
+    published_at
+  ) values (
+    v_session_id,
+    v_league_id::text || '/' || p_event_id::text || '/' || v_session_id::text || '/' || gen_random_uuid()::text || '.csv',
+    md5(v_session_id::text || '-' || clock_timestamp()::text || '-' || random()::text),
+    v_actor.id,
+    'published',
+    now()
+  )
+  returning id into v_upload_id;
+
+  -- Insert each validated result row
+  for v_row in select * from jsonb_array_elements(p_rows)
+  loop
+    v_raw_comp := trim(coalesce(v_row ->> 'rawCompetitorName', 'Driver'));
+    if v_raw_comp = '' then
+      v_raw_comp := 'Driver';
+    end if;
+
+    v_driver_id := nullif(trim(coalesce(v_row ->> 'driverId', '')), '')::uuid;
+    v_start_num := nullif(trim(coalesce(v_row ->> 'startNumber', '')), '');
+
+    -- If no existing driver was selected, create or reuse a guest driver in this league
+    if v_driver_id is null then
+      v_comp_norm := lower(regexp_replace(v_raw_comp, '\s+', ' ', 'g'));
+
+      select da.driver_id into v_driver_id
+      from public.driver_aliases da
+      where da.league_id = v_league_id and da.alias_norm = v_comp_norm
+      limit 1;
+
+      if v_driver_id is null then
+        v_base_handle := lower(regexp_replace(v_raw_comp, '[^a-zA-Z0-9_-]+', '-', 'g'));
+        v_base_handle := trim(both '-' from v_base_handle);
+        if length(v_base_handle) < 2 then
+          v_base_handle := 'guest-' || substr(gen_random_uuid()::text, 1, 6);
+        end if;
+        v_base_handle := substr(v_base_handle, 1, 30);
+        v_candidate_handle := '@' || v_base_handle;
+        v_suffix := 0;
+        while exists (select 1 from public.drivers where handle = v_candidate_handle) loop
+          v_suffix := v_suffix + 1;
+          v_candidate_handle := '@' || v_base_handle || '-' || v_suffix::text;
+        end loop;
+
+        insert into public.drivers (display_name, handle, driver_number)
+        values (v_raw_comp, v_candidate_handle, coalesce(v_start_num, ''))
+        returning id into v_driver_id;
+
+        insert into public.league_members (league_id, driver_id, role, app_role)
+        values (v_league_id, v_driver_id, 'racer', 'RACER')
+        on conflict (league_id, driver_id) do nothing;
+      end if;
+    end if;
+
+    -- Save confirmed alias in `driver_aliases` so future uploads auto-match
+    v_comp_norm := lower(regexp_replace(v_raw_comp, '\s+', ' ', 'g'));
+    if v_comp_norm <> '' then
+      insert into public.driver_aliases (league_id, alias_norm, alias_raw, driver_id, confirmed_by)
+      values (v_league_id, v_comp_norm, v_raw_comp, v_driver_id, v_actor.id)
+      on conflict (league_id, alias_norm) do update
+      set driver_id = excluded.driver_id, confirmed_by = excluded.confirmed_by;
+    end if;
+
+    -- Sync driver's team into `event_entries` (using `team_roster` if available)
+    select tr.team_id into v_team_id
+    from public.team_roster tr
+    where tr.season_id = v_season_id and tr.driver_id = v_driver_id
+    limit 1;
+
+    begin
+      insert into public.event_entries (event_id, driver_id, team_id, is_reserve)
+      values (p_event_id, v_driver_id, v_team_id, false)
+      on conflict (event_id, driver_id) do update
+      set team_id = coalesce(excluded.team_id, public.event_entries.team_id);
+    exception when others then
+      -- If driver has a licence ban trigger warning, still allow result record
+      null;
+    end;
+
+    v_pos := nullif(trim(coalesce(v_row ->> 'posInSession', '')), '')::int;
+    v_status := coalesce(nullif(upper(trim(coalesce(v_row ->> 'status', 'FIN'))), ''), 'FIN')::public.result_status;
+    v_laps := nullif(trim(coalesce(v_row ->> 'laps', '')), '')::int;
+    v_total_ms := nullif(trim(coalesce(v_row ->> 'totalTimeMs', '')), '')::int;
+    v_gap_ms := nullif(trim(coalesce(v_row ->> 'gapMs', '')), '')::int;
+    v_gap_laps := nullif(trim(coalesce(v_row ->> 'gapLaps', '')), '')::int;
+    v_best_ms := nullif(trim(coalesce(v_row ->> 'bestLapMs', '')), '')::int;
+    v_second_ms := nullif(trim(coalesce(v_row ->> 'secondBestLapMs', '')), '')::int;
+    v_best_lap_no := nullif(trim(coalesce(v_row ->> 'bestLapNo', '')), '')::int;
+    v_best_speed := nullif(trim(coalesce(v_row ->> 'bestSpeedKmh', '')), '')::numeric(7, 3);
+
+    insert into public.session_results (
+      session_id,
+      upload_id,
+      driver_id,
+      raw_competitor_name,
+      pos_in_session,
+      start_number,
+      class,
+      status,
+      laps,
+      total_time_ms,
+      gap_ms,
+      gap_laps,
+      best_lap_ms,
+      second_best_lap_ms,
+      best_lap_no,
+      best_speed_kmh,
+      raw
+    ) values (
+      v_session_id,
+      v_upload_id,
+      v_driver_id,
+      v_raw_comp,
+      v_pos,
+      v_start_num,
+      nullif(trim(coalesce(v_row ->> 'className', '')), ''),
+      v_status,
+      v_laps,
+      v_total_ms,
+      v_gap_ms,
+      v_gap_laps,
+      v_best_ms,
+      v_second_ms,
+      v_best_lap_no,
+      v_best_speed,
+      coalesce(v_row -> 'raw', '{}'::jsonb)
+    )
+    on conflict (upload_id, driver_id) do update
+    set
+      raw_competitor_name = excluded.raw_competitor_name,
+      pos_in_session = excluded.pos_in_session,
+      start_number = excluded.start_number,
+      status = excluded.status,
+      laps = excluded.laps,
+      total_time_ms = excluded.total_time_ms,
+      gap_ms = excluded.gap_ms,
+      gap_laps = excluded.gap_laps,
+      best_lap_ms = excluded.best_lap_ms,
+      second_best_lap_ms = excluded.second_best_lap_ms,
+      best_lap_no = excluded.best_lap_no,
+      best_speed_kmh = excluded.best_speed_kmh,
+      raw = excluded.raw;
+  end loop;
+
+  return v_upload_id;
+end;
+$$;
+
+-- 2. Get uploaded sessions & Combined Quali leaderboard for an event (used for A/B/C Finals split & status badges)
+create or replace function public.fn_get_event_upload_state(
+  p_event_id uuid
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_sessions jsonb;
+  v_combined_quali jsonb;
+  v_aliases jsonb;
+  v_league_id uuid;
+begin
+  select e.league_id into v_league_id from public.events e where e.id = p_event_id;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'sessionId', s.id,
+        'kind', s.kind,
+        'batchNo', s.batch_no,
+        'finalLetter', s.final_letter,
+        'rowCount', (
+          select count(*) from public.v_results vr where vr.session_id = s.id
+        )
+      )
+      order by s.kind, s.batch_no nulls last, s.final_letter nulls last
+    ),
+    '[]'::jsonb
+  ) into v_sessions
+  from public.sessions s
+  where s.event_id = p_event_id
+    and exists (select 1 from public.uploads u where u.session_id = s.id and u.status = 'published');
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'driverId', cq.driver_id,
+        'displayName', coalesce(nullif(trim(d.first_name || ' ' || d.surname), ''), d.display_name, d.handle),
+        'firstName', d.first_name,
+        'surname', d.surname,
+        'driverNumber', d.driver_number,
+        'bestLapMs', cq.best_lap_ms,
+        'secondBestLapMs', cq.second_best_lap_ms,
+        'splitPos', cq.split_pos,
+        'isDsq', cq.is_dsq
+      )
+      order by cq.split_pos asc nulls last
+    ),
+    '[]'::jsonb
+  ) into v_combined_quali
+  from public.v_combined_quali cq
+  join public.drivers d on d.id = cq.driver_id
+  where cq.event_id = p_event_id;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'aliasNorm', da.alias_norm,
+        'driverId', da.driver_id
+      )
+    ),
+    '[]'::jsonb
+  ) into v_aliases
+  from public.driver_aliases da
+  where da.league_id = v_league_id;
+
+  return jsonb_build_object(
+    'uploadedSessions', v_sessions,
+    'combinedQuali', v_combined_quali,
+    'aliases', v_aliases
+  );
+end;
+$$;
+
+notify pgrst, 'reload schema';

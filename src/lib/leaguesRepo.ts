@@ -797,3 +797,116 @@ export async function fetchLeagueInviteInfoInSupabase(
     invitePassword: row.invite_password ? String(row.invite_password) : null,
   }
 }
+
+export interface UploadedSessionInfo {
+  sessionId: string
+  kind: 'QUALI' | 'FINAL'
+  batchNo: number | null
+  finalLetter: string | null
+  rowCount: number
+}
+
+export interface EventUploadState {
+  uploadedSessions: UploadedSessionInfo[]
+  combinedQuali: {
+    driverId: string
+    displayName: string
+    firstName: string
+    surname: string
+    driverNumber: string
+    bestLapMs: number | null
+    secondBestLapMs: number | null
+    splitPos: number
+    isDsq: boolean
+  }[]
+  aliases: { aliasNorm: string; driverId: string }[]
+}
+
+export async function fetchEventUploadStateInSupabase(
+  eventId: string
+): Promise<EventUploadState> {
+  const { data, error } = await supabase.rpc('fn_get_event_upload_state', {
+    p_event_id: eventId,
+  })
+
+  if (error || !data || typeof data !== 'object') {
+    return {
+      uploadedSessions: [],
+      combinedQuali: [],
+      aliases: [],
+    }
+  }
+
+  const obj = data as Record<string, unknown>
+  const rawSessions = Array.isArray(obj.uploadedSessions)
+    ? obj.uploadedSessions
+    : []
+  const rawQuali = Array.isArray(obj.combinedQuali) ? obj.combinedQuali : []
+  const rawAliases = Array.isArray(obj.aliases) ? obj.aliases : []
+
+  return {
+    uploadedSessions: rawSessions.map((s: Record<string, unknown>) => ({
+      sessionId: String(s.sessionId || ''),
+      kind: s.kind === 'FINAL' ? 'FINAL' : 'QUALI',
+      batchNo: s.batchNo != null ? Number(s.batchNo) : null,
+      finalLetter: s.finalLetter ? String(s.finalLetter) : null,
+      rowCount: Number(s.rowCount || 0),
+    })),
+    combinedQuali: rawQuali.map((q: Record<string, unknown>) => ({
+      driverId: String(q.driverId || ''),
+      displayName: String(q.displayName || 'Driver'),
+      firstName: String(q.firstName || ''),
+      surname: String(q.surname || ''),
+      driverNumber: String(q.driverNumber || ''),
+      bestLapMs: q.bestLapMs != null ? Number(q.bestLapMs) : null,
+      secondBestLapMs:
+        q.secondBestLapMs != null ? Number(q.secondBestLapMs) : null,
+      splitPos: Number(q.splitPos || 1),
+      isDsq: Boolean(q.isDsq),
+    })),
+    aliases: rawAliases.map((a: Record<string, unknown>) => ({
+      aliasNorm: String(a.aliasNorm || ''),
+      driverId: String(a.driverId || ''),
+    })),
+  }
+}
+
+export async function uploadSessionResultsInSupabase(input: {
+  eventId: string
+  kind: 'QUALI' | 'FINAL'
+  batchNo: number | null
+  finalLetter: string | null
+  maxKarts: number
+  rows: {
+    driverId: string | null
+    rawCompetitorName: string
+    posInSession: number | null
+    startNumber: string
+    className: string
+    status: 'FIN' | 'DNF' | 'DNS' | 'DSQ'
+    laps: number | null
+    totalTimeMs: number | null
+    gapMs: number | null
+    gapLaps: number | null
+    bestLapMs: number | null
+    secondBestLapMs: number | null
+    bestLapNo: number | null
+    bestSpeedKmh: number | null
+    raw: Record<string, string>
+  }[]
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('fn_upload_session_results', {
+    p_event_id: input.eventId,
+    p_kind: input.kind,
+    p_batch_no: input.kind === 'QUALI' ? input.batchNo || 1 : null,
+    p_final_letter: input.kind === 'FINAL' ? input.finalLetter || 'A' : null,
+    p_max_karts: input.maxKarts || 12,
+    p_rows: input.rows,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return String(data)
+}

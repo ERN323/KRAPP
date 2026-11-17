@@ -40,6 +40,7 @@ import { TrackDayHeader, CardGraphicSvg } from './components/TrackDayTheme'
 import { AuthScreen } from './components/AuthScreen'
 import { LogoCropModal } from './components/LogoCropModal'
 import { InviteRacersModal } from './components/InviteRacersModal'
+import { UploadRaceResultsScreen } from './components/UploadRaceResultsScreen'
 import {
   KartingTrackInfo,
   TrackConfigCode,
@@ -127,6 +128,7 @@ export type AppView =
   | 'assign-roles'
   | 'manage-racers'
   | 'schedule-race'
+  | 'upload-race-results'
   | 'create-team'
   | 'create-team-manage-racers'
   | 'league-setting-action'
@@ -1409,9 +1411,28 @@ export function App() {
     }
   }
 
+  const handleOpenUploadRaceResults = async () => {
+    if (!selectedLeague) return
+    setActiveView('upload-race-results')
+    setLoadingMembers(true)
+    const [members, teams, events] = await Promise.all([
+      fetchLeagueMembers(selectedLeague.id),
+      fetchLeagueTeamsWithRosters(selectedLeague.id),
+      fetchLeagueEventsInSupabase(selectedLeague.id),
+    ])
+    setLeagueMembers(members)
+    setLeagueTeams(teams)
+    setLeagueRaceEvents(events)
+    setLoadingMembers(false)
+  }
+
   const handleOpenSettingAction = (actionTitle: string) => {
     if (actionTitle === 'TEAMS' || actionTitle === 'MY TEAM') {
       handleOpenMyTeam()
+      return
+    }
+    if (actionTitle === 'UPLOAD RACE RESULTS') {
+      handleOpenUploadRaceResults()
       return
     }
     if (actionTitle === 'ASSIGN ROLES') {
@@ -5154,6 +5175,28 @@ export function App() {
               </div>
             </div>
           )}
+
+        {/* ================= 10E. UPLOAD RACE RESULTS SCREEN (Admin Only) ================= */}
+        {activeView === 'upload-race-results' && selectedLeague && (
+          <UploadRaceResultsScreen
+            league={selectedLeague}
+            members={leagueMembers}
+            teams={leagueTeams}
+            events={leagueRaceEvents}
+            unreadNotificationsCount={unreadNotificationsCount}
+            onBack={() => setActiveView('league-options')}
+            onBellClick={handleOpenNotifications}
+            onScheduleNewRace={handleOpenScheduleRace}
+            onResultsPublished={async () => {
+              const [refreshedMembers, refreshedEvents] = await Promise.all([
+                fetchLeagueMembers(selectedLeague.id),
+                fetchLeagueEventsInSupabase(selectedLeague.id),
+              ])
+              setLeagueMembers(refreshedMembers)
+              setLeagueRaceEvents(refreshedEvents)
+            }}
+          />
+        )}
 
         {/* ================= 11. NOTIFICATIONS SCREEN (Bell on Homescreen) ================= */}
         {activeView === 'notifications' && (
