@@ -60,7 +60,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
   onScheduleNewRace,
   onResultsPublished,
 }) => {
-  // 1. Mode: 'QUALY' or 'RACE' (Finals)
+  // 1. Mode: 'QUALY' or 'RACE' (Finals) — Only these two choices!
   const [uploadMode, setUploadMode] = useState<'QUALY' | 'RACE'>('QUALY')
 
   // 2. Selected Scheduled Race (`DATE` in wireframe)
@@ -69,14 +69,10 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
   )
   const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false)
 
-  // 3. Available Karts / Max Racers per Heat (`RACER COUNT` in wireframe, default 12)
+  // 3. RACER COUNT / Available Karts per Heat (no upper limit, defaults to 12)
   const [maxKartsPerHeat, setMaxKartsPerHeat] = useState<string>('12')
 
-  // 4. Heat / Final selector (Qualy 1, 2, 3... or Final A, B, C...)
-  const [selectedQualyBatch, setSelectedQualyBatch] = useState<number>(1)
-  const [selectedFinalLetter, setSelectedFinalLetter] = useState<string>('A')
-
-  // 5. Event Upload State from Supabase (which sessions are uploaded + Combined Quali for Finals split)
+  // 4. Event Upload State from Supabase (Combined Quali & saved driver aliases)
   const [eventUploadState, setEventUploadState] = useState<EventUploadState>({
     uploadedSessions: [],
     combinedQuali: [],
@@ -84,21 +80,19 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
   })
   const [loadingEventState, setLoadingEventState] = useState(false)
 
-  // 6. Qualy Randomizer State
+  // 5. Qualy Randomizer & Finals Grid Helpers
   const [showQualyRandomizer, setShowQualyRandomizer] = useState(false)
   const [randomizedHeats, setRandomizedHeats] = useState<QualyHeatGroup[]>([])
-
-  // 7. Finals Split Preview State
   const [showFinalsSplit, setShowFinalsSplit] = useState(false)
 
-  // 8. Parsed / Editable Rows for Validation before upload
+  // 6. Parsed / Editable Rows for Validation before upload (auto-sorted!)
   const [parsedRows, setParsedRows] = useState<ParsedSessionRow[]>([])
   const [parseWarnings, setParseWarnings] = useState<string[]>([])
-  const [uploadedFileName, setUploadedFileName] = useState<string>('')
+  const [uploadedFileNames, setUploadedFileNames] = useState<string[]>([])
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
   const [isScanningPhoto, setIsScanningPhoto] = useState(false)
 
-  // 9. Submission State
+  // 7. Submission State
   const [isPublishing, setIsPublishing] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
@@ -134,13 +128,99 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
 
   const parsedMaxKarts = Math.max(1, parseInt(maxKartsPerHeat, 10) || 12)
 
-  // Compute Alphabetical Finals Split (A, B, C...) from Combined Qualifying
+  // Compute Alphabetical Finals Split (A, B, C, D, E, F...) from Combined Qualifying
   const finalsSplitGroups = computeAlphabeticalFinalsSplit(
     eventUploadState.combinedQuali,
     parsedMaxKarts
   )
 
-  // Generate randomized equal Qualy heats
+  // Automatically sort and merge rows by mode:
+  // - QUALY: sorted by fastest `bestLapMs` ascending (DNS/null at bottom), keeping best lap if same driver appears in multiple files
+  // - RACE: sorted by Final group letter (from Qualy rank) -> status (FIN, DNF, DNS, DSQ) -> laps desc -> totalTimeMs asc
+  const sortAndMergeRows = (
+    rowsToMerge: ParsedSessionRow[],
+    mode: 'QUALY' | 'RACE'
+  ): ParsedSessionRow[] => {
+    const byKey = new Map<string, ParsedSessionRow>()
+    for (const r of rowsToMerge) {
+      const key =
+        r.matchedDriverId ||
+        r.rawCompetitorName.trim().toLowerCase() ||
+        r.rowId
+      const existing = byKey.get(key)
+      if (!existing) {
+        byKey.set(key, r)
+      } else if (mode === 'QUALY') {
+        // Keep faster bestLapMs
+        const keepNew =
+          r.bestLapMs != null &&
+          (existing.bestLapMs == null || r.bestLapMs < existing.bestLapMs)
+        byKey.set(key, keepNew ? r : existing)
+      } else {
+        byKey.set(key, r)
+      }
+    }
+
+    const merged = Array.from(byKey.values())
+
+    const getDriverFinalLetter = (r: ParsedSessionRow): string => {
+      if (r.matchedDriverId) {
+        const qEntry = eventUploadState.combinedQuali.find(
+          (q) => q.driverId === r.matchedDriverId
+        )
+        if (qEntry && qEntry.splitPos > 0) {
+          const idx = Math.min(
+            25,
+            Math.floor((qEntry.splitPos - 1) / parsedMaxKarts)
+          )
+          return String.fromCharCode(65 + idx)
+        }
+      }
+      return 'A'
+    }
+
+    const statusOrder: Record<SessionResultStatus, number> = {
+      FIN: 0,
+      DNF: 1,
+      DNS: 2,
+      DSQ: 3,
+    }
+
+    if (mode === 'QUALY') {
+      merged.sort((a, b) => {
+        if (a.bestLapMs != null && b.bestLapMs != null) {
+          return a.bestLapMs - b.bestLapMs
+        }
+        if (a.bestLapMs != null) return -1
+        if (b.bestLapMs != null) return 1
+        return (a.posInSession ?? 999) - (b.posInSession ?? 999)
+      })
+    } else {
+      merged.sort((a, b) => {
+        const letA = getDriverFinalLetter(a)
+        const letB = getDriverFinalLetter(b)
+        if (letA !== letB) return letA.localeCompare(letB)
+        const stDiff = statusOrder[a.status] - statusOrder[b.status]
+        if (stDiff !== 0) return stDiff
+        const lapsA = a.laps ?? 0
+        const lapsB = b.laps ?? 0
+        if (lapsA !== lapsB) return lapsB - lapsA
+        if (a.totalTimeMs != null && b.totalTimeMs != null) {
+          return a.totalTimeMs - b.totalTimeMs
+        }
+        if (a.totalTimeMs != null) return -1
+        if (b.totalTimeMs != null) return 1
+        return (a.posInSession ?? 999) - (b.posInSession ?? 999)
+      })
+    }
+
+    return merged.map((r, idx) => ({
+      ...r,
+      posInSession: idx + 1,
+    }))
+  }
+
+  // Generate randomized equal Qualy heats (any number of heats needed)
   const handleRunQualyRandomizer = () => {
     const heats = generateRandomQualyHeats(members, parsedMaxKarts)
     setRandomizedHeats(heats)
@@ -202,35 +282,49 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
     URL.revokeObjectURL(url)
   }
 
-  // Handle SpeedHive CSV File Selection
-  const handleCsvFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // Handle SpeedHive CSV File Selection (supports selecting 1 or multiple CSV files at once!)
+  const handleCsvFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const fileList = e.target.files
+    if (!fileList || fileList.length === 0) return
     setErrorMsg('')
     setSuccessMsg('')
-    setUploadedFileName(file.name)
     setPhotoPreviewUrl(null)
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const text = typeof reader.result === 'string' ? reader.result : ''
-        const expectedKind = uploadMode === 'QUALY' ? 'QUALI' : 'FINAL'
+    const files = Array.from(fileList)
+    const expectedKind = uploadMode === 'QUALY' ? 'QUALI' : 'FINAL'
+    const newRows: ParsedSessionRow[] = []
+    const allWarnings: string[] = []
+    const names: string[] = []
+
+    try {
+      for (const file of files) {
+        names.push(file.name)
+        const text = await file.text()
         const parsed = parseSpeedhiveCsvText(
           text,
           members,
           eventUploadState.aliases,
           expectedKind
         )
-        setParsedRows(parsed.rows)
-        setParseWarnings(parsed.warnings)
-      } catch (err: unknown) {
-        setErrorMsg(
-          err instanceof Error ? err.message : 'Could not parse CSV file'
-        )
+        newRows.push(...parsed.rows)
+        allWarnings.push(...parsed.warnings)
       }
+
+      const combinedRows = sortAndMergeRows(
+        [...parsedRows, ...newRows],
+        uploadMode
+      )
+      setParsedRows(combinedRows)
+      setUploadedFileNames((prev) => Array.from(new Set([...prev, ...names])))
+      setParseWarnings(Array.from(new Set(allWarnings)))
+    } catch (err: unknown) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Could not parse CSV file(s)'
+      )
     }
-    reader.readAsText(file)
+
     e.target.value = ''
   }
 
@@ -242,7 +336,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
     if (!file) return
     setErrorMsg('')
     setSuccessMsg('')
-    setUploadedFileName(file.name)
+    setUploadedFileNames((prev) => Array.from(new Set([...prev, file.name])))
 
     const reader = new FileReader()
     reader.onload = async () => {
@@ -250,7 +344,6 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
       if (!dataUrl) return
       setPhotoPreviewUrl(dataUrl)
 
-      // Check if an optional Gemini API key is configured for automatic Vision OCR
       const geminiKey = (
         import.meta.env.VITE_GEMINI_API_KEY as string | undefined
       )?.trim()
@@ -299,54 +392,35 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
               eventUploadState.aliases,
               expectedKind
             )
-            setParsedRows(parsed.rows)
+            setParsedRows(
+              sortAndMergeRows([...parsedRows, ...parsed.rows], uploadMode)
+            )
             setParseWarnings([
-              'Scanned from printed sheet photo — please review all rows and lap times below before clicking UPLOAD RESULT.',
+              'Scanned from printed sheet photo — review all rows and lap times below before clicking UPLOAD RESULT.',
               ...parsed.warnings,
             ])
             setIsScanningPhoto(false)
             return
           }
         } catch {
-          // Fall back to interactive photo-assisted verification table below
+          // Fall back to interactive verification rows below
         }
         setIsScanningPhoto(false)
       }
 
-      // Pre-populate interactive verification rows from current Final split or Qualy heat so the Admin can verify/enter times alongside the photo
       if (parsedRows.length === 0) {
-        prefillRowsForCurrentSession()
-      }
-      setParseWarnings([
-        'Printed timing sheet photo attached! Review or enter the times from the photo in the validation table below before clicking UPLOAD RESULT.',
-      ])
-    }
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
-
-  // Helper to pre-populate rows from the current Qualy Heat or Final Group
-  const prefillRowsForCurrentSession = () => {
-    if (uploadMode === 'RACE') {
-      const targetFinal = finalsSplitGroups.find(
-        (g) => g.letter === selectedFinalLetter
-      )
-      if (targetFinal && targetFinal.entries.length > 0) {
         setParsedRows(
-          targetFinal.entries.map((entry, idx) => {
-            const memberObj = members.find((m) => m.driverId === entry.driverId)
-            const trackId = memberObj
-              ? buildMemberTrackDriverId(memberObj, idx)
-              : entry.displayName
+          members.map((m, idx) => {
+            const trackId = buildMemberTrackDriverId(m, idx)
             return {
               rowId: `prefill-${idx}-${Date.now()}`,
               posInSession: idx + 1,
-              startNumber: entry.driverNumber || String(idx + 1),
+              startNumber: m.driverNumber || String(idx + 1),
               rawCompetitorName: trackId,
-              matchedDriverId: entry.driverId,
+              matchedDriverId: m.driverId,
               className: '',
               status: 'FIN',
-              laps: 10,
+              laps: 8,
               totalTimeText: '',
               totalTimeMs: null,
               diffText: '',
@@ -360,51 +434,19 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
               bestSpeedKmh: null,
               raw: {
                 Pos: String(idx + 1),
-                'Start Number': entry.driverNumber || String(idx + 1),
+                'Start Number': m.driverNumber || String(idx + 1),
                 Competitor: trackId,
               },
             }
           })
         )
-        return
       }
+      setParseWarnings([
+        'Printed timing sheet photo attached! Review or enter the times from the photo in the validation table below before clicking UPLOAD RESULT.',
+      ])
     }
-
-    const heatRacers =
-      randomizedHeats.find((h) => h.batchNo === selectedQualyBatch)?.racers ||
-      members.slice(0, parsedMaxKarts)
-
-    setParsedRows(
-      heatRacers.map((m, idx) => {
-        const trackId = buildMemberTrackDriverId(m, idx)
-        return {
-          rowId: `prefill-${idx}-${Date.now()}`,
-          posInSession: idx + 1,
-          startNumber: m.driverNumber || String(idx + 1),
-          rawCompetitorName: trackId,
-          matchedDriverId: m.driverId,
-          className: '',
-          status: 'FIN',
-          laps: 8,
-          totalTimeText: '',
-          totalTimeMs: null,
-          diffText: '',
-          gapMs: null,
-          gapLaps: null,
-          bestLapText: '',
-          bestLapMs: null,
-          secondBestLapText: '',
-          secondBestLapMs: null,
-          bestLapNo: null,
-          bestSpeedKmh: null,
-          raw: {
-            Pos: String(idx + 1),
-            'Start Number': m.driverNumber || String(idx + 1),
-            Competitor: trackId,
-          },
-        }
-      })
-    )
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   const handleUpdateRow = (
@@ -459,7 +501,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
     setParsedRows((prev) => prev.filter((r) => r.rowId !== rowId))
   }
 
-  // Publish Validated Results to Supabase
+  // Publish Validated Results to Supabase (automatically assigns & sorts per racer!)
   const handleConfirmUploadResult = async () => {
     if (!selectedEvent) {
       setErrorMsg('Please select or schedule a race date first.')
@@ -477,13 +519,15 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
     setSuccessMsg('')
     try {
       const kindToUpload = uploadMode === 'QUALY' ? 'QUALI' : 'FINAL'
+      const sortedRows = sortAndMergeRows(parsedRows, uploadMode)
+
       await uploadSessionResultsInSupabase({
         eventId: selectedEvent.id,
         kind: kindToUpload,
-        batchNo: kindToUpload === 'QUALI' ? selectedQualyBatch : null,
-        finalLetter: kindToUpload === 'FINAL' ? selectedFinalLetter : null,
+        batchNo: kindToUpload === 'QUALI' ? 1 : null,
+        finalLetter: null, // Auto-detected per driver from Combined Qualy rank in SQL!
         maxKarts: parsedMaxKarts,
-        rows: parsedRows.map((r, idx) => {
+        rows: sortedRows.map((r, idx) => {
           const matchedMember = members.find(
             (m) => m.driverId === r.matchedDriverId
           )
@@ -495,7 +539,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
           return {
             driverId: r.matchedDriverId,
             rawCompetitorName: compName,
-            posInSession: r.posInSession ?? idx + 1,
+            posInSession: idx + 1,
             startNumber: r.startNumber,
             className: r.className,
             status: r.status,
@@ -509,7 +553,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
             bestSpeedKmh: r.bestSpeedKmh,
             raw: {
               ...r.raw,
-              Pos: String(r.posInSession ?? idx + 1),
+              Pos: String(idx + 1),
               'Start Number': r.startNumber,
               Competitor: compName,
               Laps: r.laps != null ? String(r.laps) : '-',
@@ -523,16 +567,12 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
       await refreshEventState(selectedEvent.id)
       await onResultsPublished()
 
-      const sessionLabel =
-        uploadMode === 'QUALY'
-          ? `QUALY ${selectedQualyBatch}`
-          : `FINAL ${selectedFinalLetter}`
       setSuccessMsg(
-        `${sessionLabel} (${parsedRows.length} drivers) validated & uploaded to database!`
+        `${uploadMode} results (${sortedRows.length} drivers) automatically sorted & uploaded to the database!`
       )
       setParsedRows([])
       setParseWarnings([])
-      setUploadedFileName('')
+      setUploadedFileNames([])
       setPhotoPreviewUrl(null)
     } catch (err: unknown) {
       setErrorMsg(
@@ -544,16 +584,6 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
       setIsPublishing(false)
     }
   }
-
-  // Helper to check if a Qualy batch or Final letter is already uploaded
-  const isQualyUploaded = (batchNo: number) =>
-    eventUploadState.uploadedSessions.some(
-      (s) => s.kind === 'QUALI' && s.batchNo === batchNo
-    )
-  const isFinalUploaded = (letter: string) =>
-    eventUploadState.uploadedSessions.some(
-      (s) => s.kind === 'FINAL' && s.finalLetter === letter
-    )
 
   return (
     <div className="flex flex-col flex-1 w-full">
@@ -572,7 +602,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
             UPLOAD RACE RESULTS
           </h2>
 
-          {/* 1. RACE / QUALY MODE SELECTOR PILLS (Matching Wireframe) */}
+          {/* 1. RACE / QUALY MODE SELECTOR PILLS (Matching Wireframe — Only 2 choices!) */}
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
@@ -580,6 +610,9 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                 setUploadMode('RACE')
                 setErrorMsg('')
                 setSuccessMsg('')
+                if (parsedRows.length > 0) {
+                  setParsedRows((prev) => sortAndMergeRows(prev, 'RACE'))
+                }
               }}
               className={`h-11 rounded-full font-display font-extrabold text-base tracking-wider uppercase transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 uploadMode === 'RACE'
@@ -597,6 +630,9 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                 setUploadMode('QUALY')
                 setErrorMsg('')
                 setSuccessMsg('')
+                if (parsedRows.length > 0) {
+                  setParsedRows((prev) => sortAndMergeRows(prev, 'QUALY'))
+                }
               }}
               className={`h-11 rounded-full font-display font-extrabold text-base tracking-wider uppercase transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 uploadMode === 'QUALY'
@@ -686,82 +722,51 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
             )}
           </div>
 
-          {/* 3. RACER COUNT / AVAILABLE KARTS PER HEAT PILL (Max 12 or fewer) */}
+          {/* 3. RACER COUNT PILL (No upper cap!) */}
           <div className="w-full bg-[#14191E] border border-[#2A323B] focus-within:border-[#FF6B00] rounded-full h-11 px-5 flex items-center justify-between gap-2 shadow-inner">
             <div className="flex items-center gap-2">
               <Users className="w-4 h-4 text-[#FF6B00] shrink-0" />
               <span className="font-display font-extrabold text-sm tracking-wider text-[#FF6B00] uppercase">
-                RACER COUNT (MAX KARTS / HEAT)
+                RACER COUNT (KARTS PER HEAT)
               </span>
             </div>
             <input
               type="number"
               min={1}
-              max={30}
               value={maxKartsPerHeat}
               onChange={(e) => setMaxKartsPerHeat(e.target.value)}
-              className="w-16 bg-[#1C2228] border border-[#2A323B] rounded-full h-7 text-center font-display font-extrabold text-sm text-white focus:outline-none focus:border-[#FF6B00]"
+              className="w-20 bg-[#1C2228] border border-[#2A323B] rounded-full h-7 text-center font-display font-extrabold text-sm text-white focus:outline-none focus:border-[#FF6B00]"
             />
           </div>
 
-          {/* 4. SESSION PICKER + QUALY RANDOMIZER OR FINALS ALPHABETICAL SPLIT */}
+          {/* 4. OPTIONAL HELPER BAR: QUALY RANDOMIZER OR FINALS A-Z GRID PREVIEW */}
           {uploadMode === 'QUALY' ? (
-            <div className="w-full bg-[#14191E] border border-[#2A323B] rounded-2xl p-3 flex flex-col gap-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#8A99AD]">
-                  SELECT QUALY HEAT TO UPLOAD:
+            <div className="w-full flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={handleRunQualyRandomizer}
+                className="w-full bg-[#14191E] hover:bg-[#192026] border border-[#38BDF8]/50 rounded-full h-9 px-4 flex items-center justify-center gap-1.5 text-[11px] font-display font-extrabold uppercase tracking-wider text-[#38BDF8] cursor-pointer transition"
+              >
+                <Shuffle className="w-3.5 h-3.5" />
+                <span>
+                  QUALY RANDOMIZER ({members.length} Racers →{' '}
+                  {Math.max(1, Math.ceil(members.length / parsedMaxKarts))}{' '}
+                  Equal Qualy Heats)
                 </span>
-                <button
-                  type="button"
-                  onClick={handleRunQualyRandomizer}
-                  className="px-2.5 py-1 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#38BDF8]/60 text-[10px] font-extrabold uppercase tracking-wider text-[#38BDF8] flex items-center gap-1 cursor-pointer transition"
-                >
-                  <Shuffle className="w-3 h-3" />
-                  Qualy Randomizer
-                </button>
-              </div>
+              </button>
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-                {[1, 2, 3, 4].map((batchNo) => {
-                  const isActive = selectedQualyBatch === batchNo
-                  const isDone = isQualyUploaded(batchNo)
-                  return (
-                    <button
-                      key={batchNo}
-                      type="button"
-                      onClick={() => setSelectedQualyBatch(batchNo)}
-                      className={`px-3.5 py-1.5 rounded-full font-display font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shrink-0 transition cursor-pointer ${
-                        isActive
-                          ? 'bg-[#FF6B00] text-black border border-white shadow'
-                          : 'bg-[#1C2228] hover:bg-[#252D35] text-white border border-[#2A323B]'
-                      }`}
-                    >
-                      <span>QUALY {batchNo}</span>
-                      {isDone && (
-                        <Check
-                          className={`w-3.5 h-3.5 stroke-[3] ${
-                            isActive ? 'text-black' : 'text-[#22C55E]'
-                          }`}
-                        />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* QUALY RANDOMIZER PANEL (Divides League Racers Equally Across Available Karts) */}
               {showQualyRandomizer && randomizedHeats.length > 0 && (
-                <div className="mt-1 bg-[#1C2228] border border-[#38BDF8]/50 rounded-2xl p-3 flex flex-col gap-2">
+                <div className="bg-[#14191E] border border-[#38BDF8]/50 rounded-2xl p-3 flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <span className="font-display font-extrabold text-xs tracking-wider text-[#38BDF8] uppercase">
-                      RANDOM QUALY HEATS ({members.length} Racers · Max{' '}
-                      {parsedMaxKarts} Karts)
+                      {randomizedHeats.length} QUALY RACES ({members.length}{' '}
+                      Racers · Max {parsedMaxKarts} Karts)
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={handleRunQualyRandomizer}
-                        className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#14191E] border border-[#2A323B] text-[#FF6B00] cursor-pointer"
+                        className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#1C2228] border border-[#2A323B] text-[#FF6B00] cursor-pointer"
                       >
                         Re-Shuffle
                       </button>
@@ -773,6 +778,13 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                         <Download className="w-2.5 h-2.5" />
                         CSV
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowQualyRandomizer(false)}
+                        className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#1C2228] text-[#8A99AD] cursor-pointer"
+                      >
+                        Hide
+                      </button>
                     </div>
                   </div>
 
@@ -780,7 +792,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                     {randomizedHeats.map((heat) => (
                       <div
                         key={heat.batchNo}
-                        className="bg-[#14191E] border border-[#2A323B] rounded-xl p-2 flex flex-col gap-1"
+                        className="bg-[#1C2228] border border-[#2A323B] rounded-xl p-2 flex flex-col gap-1"
                       >
                         <span className="font-display font-extrabold text-xs text-[#FF6B00] uppercase">
                           QUALY {heat.batchNo} ({heat.racers.length} Racers)
@@ -800,104 +812,73 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
               )}
             </div>
           ) : (
-            <div className="w-full bg-[#14191E] border border-[#2A323B] rounded-2xl p-3 flex flex-col gap-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#8A99AD]">
-                  SELECT FINAL (ALPHABETICAL ORDER):
-                </span>
-                {finalsSplitGroups.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowFinalsSplit((s) => !s)}
-                    className="px-2.5 py-1 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#38BDF8]/60 text-[10px] font-extrabold uppercase tracking-wider text-[#38BDF8] cursor-pointer transition"
-                  >
+            finalsSplitGroups.length > 0 && (
+              <div className="w-full flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFinalsSplit((s) => !s)}
+                  className="w-full bg-[#14191E] hover:bg-[#192026] border border-[#38BDF8]/50 rounded-full h-9 px-4 flex items-center justify-center gap-1.5 text-[11px] font-display font-extrabold uppercase tracking-wider text-[#38BDF8] cursor-pointer transition"
+                >
+                  <span>
                     {showFinalsSplit
-                      ? 'Hide Finals Grid'
-                      : `View A–${finalsSplitGroups[finalsSplitGroups.length - 1].letter} Grid`}
-                  </button>
+                      ? 'HIDE FINALS STARTING GRID'
+                      : `VIEW FINALS GRID (FINAL A–${finalsSplitGroups[finalsSplitGroups.length - 1].letter} FROM QUALY)`}
+                  </span>
+                </button>
+
+                {showFinalsSplit && (
+                  <div className="bg-[#14191E] border border-[#38BDF8]/50 rounded-2xl p-3 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-display font-extrabold text-xs tracking-wider text-[#38BDF8] uppercase">
+                        ALPHABETICAL FINALS GRID (Max {parsedMaxKarts} / Final)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleExportFinalsGridCsv}
+                        className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-[#38BDF8] text-black flex items-center gap-1 cursor-pointer"
+                      >
+                        <Download className="w-2.5 h-2.5" />
+                        Export Grid CSV
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto">
+                      {finalsSplitGroups.map((grp) => (
+                        <div
+                          key={grp.letter}
+                          className="bg-[#1C2228] border border-[#2A323B] rounded-xl p-2 flex flex-col gap-1"
+                        >
+                          <span className="font-display font-extrabold text-xs text-[#FF6B00] uppercase">
+                            FINAL {grp.letter} ({grp.entries.length} Drivers)
+                          </span>
+                          {grp.entries.map((e) => (
+                            <div
+                              key={e.driverId}
+                              className="flex items-center justify-between text-[10px] font-mono text-white/90 gap-1"
+                            >
+                              <span className="truncate">
+                                P{e.gridPosInFinal}. {e.displayName}
+                              </span>
+                              <span className="text-[#38BDF8] shrink-0">
+                                {formatMsToLapText(e.bestLapMs) || 'DNS'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
-
-              <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-                {(['A', 'B', 'C', 'D'] as string[]).map((letter) => {
-                  const isActive = selectedFinalLetter === letter
-                  const isDone = isFinalUploaded(letter)
-                  return (
-                    <button
-                      key={letter}
-                      type="button"
-                      onClick={() => setSelectedFinalLetter(letter)}
-                      className={`px-3.5 py-1.5 rounded-full font-display font-extrabold text-xs tracking-wider uppercase flex items-center gap-1.5 shrink-0 transition cursor-pointer ${
-                        isActive
-                          ? 'bg-[#FF6B00] text-black border border-white shadow'
-                          : 'bg-[#1C2228] hover:bg-[#252D35] text-white border border-[#2A323B]'
-                      }`}
-                    >
-                      <span>FINAL {letter}</span>
-                      {isDone && (
-                        <Check
-                          className={`w-3.5 h-3.5 stroke-[3] ${
-                            isActive ? 'text-black' : 'text-[#22C55E]'
-                          }`}
-                        />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* AUTOMATIC ALPHABETICAL FINALS SPLIT FROM COMBINED QUALIFYING */}
-              {showFinalsSplit && finalsSplitGroups.length > 0 && (
-                <div className="mt-1 bg-[#1C2228] border border-[#38BDF8]/50 rounded-2xl p-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-display font-extrabold text-xs tracking-wider text-[#38BDF8] uppercase">
-                      FINALS GRID FROM QUALY (Max {parsedMaxKarts} / Final)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleExportFinalsGridCsv}
-                      className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-[#38BDF8] text-black flex items-center gap-1 cursor-pointer"
-                    >
-                      <Download className="w-2.5 h-2.5" />
-                      Export Grid CSV
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto">
-                    {finalsSplitGroups.map((grp) => (
-                      <div
-                        key={grp.letter}
-                        className="bg-[#14191E] border border-[#2A323B] rounded-xl p-2 flex flex-col gap-1"
-                      >
-                        <span className="font-display font-extrabold text-xs text-[#FF6B00] uppercase">
-                          FINAL {grp.letter} ({grp.entries.length} Drivers)
-                        </span>
-                        {grp.entries.map((e) => (
-                          <div
-                            key={e.driverId}
-                            className="flex items-center justify-between text-[10px] font-mono text-white/90 gap-1"
-                          >
-                            <span className="truncate">
-                              P{e.gridPosInFinal}. {e.displayName}
-                            </span>
-                            <span className="text-[#38BDF8] shrink-0">
-                              {formatMsToLapText(e.bestLapMs) || 'DNS'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            )
           )}
 
-          {/* 5. ADD CSV & SCAN PRINTED SHEET (PHOTO) BUTTONS */}
+          {/* 5. ADD CSV (Supports 1 or Multiple CSV Files at Once!) & SCAN PRINTED SHEET (PHOTO) */}
           <input
             ref={csvInputRef}
             type="file"
             accept=".csv,text/csv"
+            multiple
             onChange={handleCsvFileSelected}
             className="hidden"
           />
@@ -918,9 +899,9 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
               className="w-full bg-[#14191E] hover:bg-[#222930] border-2 border-[#FF6B00]/80 hover:border-[#FF6B00] active:scale-[0.99] transition-all rounded-full h-11 px-5 flex items-center justify-center gap-2 shadow-md cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4 text-[#FF6B00]" />
-              <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase">
-                {uploadedFileName && !photoPreviewUrl
-                  ? `CSV: ${uploadedFileName}`
+              <span className="font-display font-extrabold text-base tracking-wider text-[#FF6B00] uppercase truncate">
+                {uploadedFileNames.length > 0 && !photoPreviewUrl
+                  ? `ADD MORE CSV (${uploadedFileNames.length} FILE${uploadedFileNames.length === 1 ? '' : 'S'} LOADED)`
                   : 'ADD CSV'}
               </span>
             </button>
@@ -942,33 +923,45 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
             </button>
           </div>
 
-          {/* 6. INTERACTIVE VALIDATION & DRIVER MATCHING TABLE (Before Database Upload) */}
+          {/* 6. AUTOMATICALLY SORTED VALIDATION & DRIVER MATCHING TABLE */}
           {(parsedRows.length > 0 || photoPreviewUrl) && (
             <div className="w-full bg-[#14191E] border-2 border-[#FF6B00]/60 rounded-3xl p-3 flex flex-col gap-2.5">
               <div className="flex items-center justify-between border-b border-[#2A323B] pb-2">
                 <div className="flex flex-col">
                   <span className="font-display font-extrabold text-sm tracking-wider text-[#FF6B00] uppercase">
-                    VALIDATE{' '}
-                    {uploadMode === 'QUALY'
-                      ? `QUALY ${selectedQualyBatch}`
-                      : `FINAL ${selectedFinalLetter}`}{' '}
-                    ({parsedRows.length} ROWS)
+                    AUTO-SORTED {uploadMode} RESULTS ({parsedRows.length}{' '}
+                    RACERS)
                   </span>
                   <span className="text-[10px] text-[#8A99AD]">
-                    Check driver matches & times before uploading to database
+                    {uploadMode === 'QUALY'
+                      ? 'Automatically sorted by fastest Best Lap across all added Qualy CSVs'
+                      : 'Automatically sorted & matched to each racer'}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleAddBlankRow}
-                  className="px-2.5 py-1 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] text-[10px] font-extrabold uppercase tracking-wider text-[#FF6B00] flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus className="w-3 h-3" />
-                  Row
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setParsedRows([])
+                      setUploadedFileNames([])
+                      setParseWarnings([])
+                      setPhotoPreviewUrl(null)
+                    }}
+                    className="px-2 py-1 rounded-full bg-[#1C2228] border border-[#2A323B] text-[10px] font-extrabold uppercase text-[#8A99AD] hover:text-white cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddBlankRow}
+                    className="px-2.5 py-1 rounded-full bg-[#1C2228] hover:bg-[#252D35] border border-[#2A323B] text-[10px] font-extrabold uppercase tracking-wider text-[#FF6B00] flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Row
+                  </button>
+                </div>
               </div>
 
-              {/* Optional Printed Sheet Photo Preview */}
               {photoPreviewUrl && (
                 <div className="w-full bg-[#1C2228] border border-[#2A323B] rounded-2xl p-2 flex flex-col items-center gap-1">
                   <img
@@ -982,7 +975,6 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                 </div>
               )}
 
-              {/* Parse Warnings */}
               {parseWarnings.length > 0 && (
                 <div className="flex flex-col gap-1 bg-[#FF6B00]/10 border border-[#FF6B00]/40 rounded-2xl p-2.5">
                   {parseWarnings.map((w, idx) => (
@@ -1001,16 +993,19 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
               <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-0.5">
                 {parsedRows.map((row, idx) => {
                   const isMatched = Boolean(row.matchedDriverId)
+                  const projectedFinalLetter = String.fromCharCode(
+                    65 + Math.min(25, Math.floor(idx / parsedMaxKarts))
+                  )
+
                   return (
                     <div
                       key={row.rowId}
                       className="w-full bg-[#1C2228] border border-[#2A323B] rounded-2xl p-2.5 flex flex-col gap-2"
                     >
-                      {/* Row Top Line: Pos + CSV Competitor + Status + Delete */}
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="w-6 h-6 rounded-full bg-[#14191E] border border-[#FF6B00]/60 font-display font-extrabold text-xs text-[#FF6B00] flex items-center justify-center shrink-0">
-                            {row.posInSession ?? idx + 1}
+                            {idx + 1}
                           </span>
                           <input
                             type="text"
@@ -1026,6 +1021,11 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
+                          {uploadMode === 'QUALY' && (
+                            <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#38BDF8]/15 border border-[#38BDF8]/40 text-[#38BDF8]">
+                              → FINAL {projectedFinalLetter}
+                            </span>
+                          )}
                           <select
                             value={row.status}
                             onChange={(e) =>
@@ -1052,7 +1052,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                         </div>
                       </div>
 
-                      {/* Row Middle Line: League Driver Match Dropdown */}
+                      {/* League Driver Match Dropdown */}
                       <div className="flex items-center gap-2">
                         <span
                           className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${
@@ -1074,7 +1074,8 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                           className="w-full bg-[#14191E] border border-[#2A323B] rounded-xl px-2.5 py-1 text-xs font-bold text-white focus:outline-none focus:border-[#FF6B00] cursor-pointer"
                         >
                           <option value="">
-                            + Auto-Create / Guest ({row.rawCompetitorName || 'Driver'})
+                            + Auto-Create / Guest (
+                            {row.rawCompetitorName || 'Driver'})
                           </option>
                           {members.map((m, mIdx) => (
                             <option key={m.driverId} value={m.driverId}>
@@ -1087,7 +1088,7 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
                         </select>
                       </div>
 
-                      {/* Row Bottom Line: Laps, Best Lap, and Total Time (for RACE mode) */}
+                      {/* Laps, Best Lap, and Total Time (for RACE mode) */}
                       <div
                         className={`grid gap-2 ${
                           uploadMode === 'RACE' ? 'grid-cols-3' : 'grid-cols-2'
