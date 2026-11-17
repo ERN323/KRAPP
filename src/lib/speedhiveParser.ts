@@ -288,6 +288,19 @@ export function matchCompetitorToLeagueMember(
   return null
 }
 
+export function decodeCsvFileBuffer(buf: ArrayBuffer): string {
+  try {
+    const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+    return utf8
+  } catch {
+    try {
+      return new TextDecoder('windows-1257').decode(buf)
+    } catch {
+      return new TextDecoder('utf-8').decode(buf)
+    }
+  }
+}
+
 export function parseSpeedhiveCsvText(
   csvText: string,
   members: LeagueMemberItem[],
@@ -400,6 +413,14 @@ export function parseSpeedhiveCsvText(
       aliases
     )
 
+    const matchedMemberIdx = matchedDriverId
+      ? members.findIndex((m) => m.driverId === matchedDriverId)
+      : -1
+    const cleanCompetitorName =
+      matchedMemberIdx >= 0 && /[?\uFFFD]/.test(rawCompetitorName)
+        ? buildMemberTrackDriverId(members[matchedMemberIdx], matchedMemberIdx)
+        : rawCompetitorName
+
     const rawMap: Record<string, string> = {}
     headers.forEach((h, hIdx) => {
       rawMap[h] = cells[hIdx] ?? ''
@@ -409,7 +430,7 @@ export function parseSpeedhiveCsvText(
       rowId: `row-${i}-${Math.random().toString(36).slice(2, 7)}`,
       posInSession: parsedPos,
       startNumber,
-      rawCompetitorName,
+      rawCompetitorName: cleanCompetitorName,
       matchedDriverId,
       className,
       status,

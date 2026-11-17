@@ -28,6 +28,7 @@ import {
 import {
   ParsedSessionRow,
   SessionResultStatus,
+  decodeCsvFileBuffer,
   parseSpeedhiveCsvText,
   parseTimeMs,
   buildMemberTrackDriverId,
@@ -301,7 +302,8 @@ export const UploadRaceResultsScreen: React.FC<UploadRaceResultsScreenProps> = (
     try {
       for (const file of files) {
         names.push(file.name)
-        const text = await file.text()
+        const buf = await file.arrayBuffer()
+        const text = decodeCsvFileBuffer(buf)
         const parsed = parseSpeedhiveCsvText(
           text,
           members,
